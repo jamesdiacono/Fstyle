@@ -1,6 +1,6 @@
 # Fstyle
 
-_Fstyle_ is a functional approach to styling web applications. It lets you structure your styles as modules, which can then be composed together. When _Fstyle_ is used in conjuction with a reactivity system, styles can be made to change dynamically. _Fstyle_ does not have a build step.
+_Fstyle_ is a functional approach to styling web applications. It lets you structure your styles as modules, which can then be composed together. When _Fstyle_ is used in conjuction with a reactivity system, styles can be made to change dynamically.
 
 _Fstyle_ is in the Public Domain.
 
@@ -11,7 +11,26 @@ A __fragment__ represents an aspect of the appearance or behaviour of a DOM elem
 - `class`: A string consisting of a single CSS class name. A class must uniquely identify its rules.
 - `rules`: A string containing some CSS source code which affects only those elements assigned the class.
 
-A __factory__ is any function which returns a styler function.
+A __factory__ is any function which returns a styler function. The `style_button` factory below demonstrates how factories, stylers and fragments fit together.
+
+    function style_button() {
+        return function button_styler() {
+            return [{
+                class: "my_button",
+                rules: `
+                    .my_button {
+                        border: 0.1em solid black;
+                        color: black;
+                        background: fuchsia;
+                        padding: 1em;
+                    }
+                    .my_button:active {
+                        background: cyan;
+                    }
+                `    
+            }];
+        };
+    }
 
 ## A demonstration
 
@@ -21,29 +40,7 @@ Firstly, a new context is created. The context is responsible for injecting CSS 
 
     const require = style.context();
 
-The `style_button` function is a factory which styles lurid buttons. It has access to its very own unique class. It demonstrates how factories, stylers and fragments work together.
-
-    const button_class = style.uniqify("button");
-    function style_button() {
-        return function button_styler() {
-            return [{
-                class: button_class,
-                rules: `
-                    .${button_class} {
-                        border: 0.1em solid black;
-                        color: black;
-                        background: fuchsia;
-                        padding: 1em;
-                    }
-                    .${button_class}:active {
-                        background: cyan;
-                    }
-                `    
-            }];
-        };
-    }
-
-The factory returns a styler which is then "required", causing its fragments to be inserted into the page.
+A styler is made and "required", causing its fragments to be inserted into the page.
 
     const button_styler = style_button();
     require(button_styler);
@@ -58,18 +55,18 @@ The styler's classes are assigned to an element.
 The page now contains the following two elements:
 
     <style>
-        .u0_button {
+        .my_button {
             border: 0.1em solid black;
             color: black;
             background: fuchsia;
             padding: 1em;
         }
-        .u0_button:active {
+        .my_button:active {
             background: cyan;
         }
     </style>
 
-    <button class="u0_button">Fabulous</button>
+    <button class="my_button">Fabulous</button>
 
 Clearly, the button looks fabulous.
 
@@ -83,16 +80,22 @@ An object containing some useful functions is exported by fstyle.js:
 
 The __uniqify__ function takes a meaningful _name_ string. It returns a string which incorporates _name_, yet is guaranteed to be unique. The returned string is a valid class only if _name_ is a valid class.
 
+    style.uniqify("potato"); // "u0_potato"
     style.uniqify("potato"); // "u1_potato"
-    style.uniqify("potato"); // "u2_potato"
+
+### style.classes(_styler_)
+
+The __classes__ function invokes the _styler_ and returns an array containing the class of each fragment.
+
+    style.classes(button_styler); // ["my_button"]
 
 ### style.rule(_class_, _declarations_)
 
 The __rule__ factory makes a styler representing a single CSS rule. The styler will return an array containing a single fragment, consisting of the _declarations_ wrapped in a _class_ selector.
 
-    const centered_class = style.uniqify("centered");
+    const centered_name = style.uniqify("centered");
     function style_centered() {
-        return style.rule(centered_class, `
+        return style.rule(centered_name, `
             position: fixed;
             top: 50%;
             left: 50%;
@@ -100,16 +103,14 @@ The __rule__ factory makes a styler representing a single CSS rule. The styler w
         `);
     }
 
-### style.rule(_class_, _declarations_, _substitutions_)
+### style.rule(_name_, _declarations_template_, _substitutions_)
 
-Specifying the _substitutions_ parameter causes the _declarations_ to be interpreted as a template. Each placeholder found in _declarations_ is replaced with a value from _substitutions_. A placeholder takes the form `<my_placeholder_name>`. If _substitutions_ is a function, it is called with the placeholder name and returns the replacement. Otherwise, _substitutions_ is an object with placeholder names as keys and replacements as values.
+Each placeholder found in the _declarations_template_ is replaced with a corresponding value taken from the _substitutions_. A placeholder has the form `<placeholder_name>`, where `placeholder_name` is any non-empty string devoid of whitespace.
 
     const link_name = style.uniqify("link");
     function style_link(color) {
         return style.rule(
-            function link_class() {
-                return link_name + "_" + style.encode(color);
-            },
+            link_name,
             `
                 font-weight: bold;
                 color: <color>;
@@ -118,37 +119,46 @@ Specifying the _substitutions_ parameter causes the _declarations_ to be interpr
         );
     }
 
-This approach reads a bit better than template literals, which were used earlier in the `style_button` factory. But more importantly, it allows the same factory to produce both reactive and non-reactive stylers. The `style_link` factory above can take a color string, yet it can also take a function which returns a color string. If `color` is a reactive function, this makes the styler reactive. Reactive stylers are discussed further in the "Reactivity" section below.
+If _substitutions_ is a function, it is called with the placeholder name and returns the replacement. Otherwise, _substitutions_ is an object with placeholder names as keys. Each value on the object is either the replacement, or a function which returns the replacement. A replacement must be a string or a number.
 
-### style.fragment(_class_, _rules_)
+The `style_link` factory above can take a color string, yet it can also take a function which returns a color string. If `color` is a reactive function, this makes the styler reactive. Reactive stylers are discussed further in the "Reactivity" section below.
 
-The __fragment__ factory makes a styler which returns an array containing a single fragment.
+If the _name_ parameter is a string, it serves as a starting point for generating the class. Each replacement used by the _declarations_template_ is appended, yielding a class which uniquely identifies the fragment. Characters not permitted within a class are encoded.
+
+    style.classes(style_link("red")); // ["u2_link_red"]
+    style.classes(style_link("#fff")); // ["u2_link_\\000023fff"]
+
+The _name_ parameter may also be an array. Its elements are resolved, encoded and concatenated together to yield the class. This approach provides more control over the class, but introduces some risk that the class might not uniquely identify its rules. Alternatively, the _name_ parameter may be a function which returns the class directly.
+
+### style.fragment(_name_, _rules_template_, _substitutions_)
+
+The __fragment__ factory makes a styler which returns an array containing a single fragment. It processes the _rules_template_ with the _substitutions_ similarly to how `style.rule` does, and then replaces each occurrence of the empty placeholder `<>` with the generated class. The _substitutions_ parameter is optional.
 
     const spinner_name = style.uniqify("spinner");
-    function style_spinner() {
-        return style.fragment(spinner_name, `
-            @keyframes ${spinner_name} {
-                0% {
-                    transform: rotate(0deg);
+    function style_spinner(color, duration) {
+        return style.fragment(
+            spinner_name,
+            `
+                @keyframes <> {
+                    0% {
+                        transform: rotate(0deg);
+                    }
+                    100% {
+                        transform: rotate(360deg);
+                    }
                 }
-                100% {
-                    transform: rotate(360deg);
+                .<> {
+                    display: block;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    border-top: 4px solid <color>;
+                    animation: <> <duration> linear infinite;
                 }
-            }
-            .${spinner_name} {
-                display: block;
-                width: 20px;
-                height: 20px;
-                border-radius: 10px;
-                border-top: 4px solid pink;
-                animation: ${spinner_name} 1s linear infinite;
-            }
-        `);
+            `,
+            {color, duration}
+        );
     }
-
-### style.fragment(_class_, _rules_, _substitutions_)
-
-Specifying the _substitutions_ parameter causes the the _rules_ parameter to be interpreted as a template. See `style.rule`.
 
 ### style.mix(_styler_array_)
 
@@ -156,9 +166,21 @@ The __mix__ factory makes a styler which returns an array containing every fragm
 
     function style_centered_link(color) {
         return style.mix([
-            style_link(color),
-            style_centered()
+            style_centered(),
+            style_link(color)
         ]);
+    }
+
+Stylers containing conflicting declarations should not be mixed. Attempting to do so yields unpredictable behaviour, and is usually an indication that a styler needs parameterising.
+
+    function style_broken() {
+        return style.mix([
+            style.rule("red", "color: red;"),
+            style.rule("green", "color: green;")
+        ]);
+    }
+    function style_fixed(color) {
+        return style.rule("coloured", "color: <color>;", {color});
     }
 
 ### style.none()
@@ -181,39 +203,23 @@ In the following example, `resolve` is used in a factory which does not care whe
 
     const snippet_name = style.uniqify("snippet");
     function style_snippet(highlighted) {
-        function background_color() {
-            return (
-                style.resolve(highlighted)
-                ? "magenta"
-                : "transparent"
-            );
-        }
         return style.rule(
-            function snippet_class() {
-                return snippet_name + "_" + style.encode(background_color);
-            },
+            snippet_name,
             `
                 background-color: <background_color>;
                 font-family: monospace;
             `,
-            {background_color}
+            {
+                background_color() {
+                    return (
+                        style.resolve(highlighted)
+                        ? "magenta"
+                        : "transparent"
+                    );
+                }
+            }
         );
     }
-
-### style.encode(_value_)
-
-The __encode__ function resolves a _value_ and encodes it as a string which is safe to append to a CSS class name.
-
-    style.encode("10%");          // "10\\000025"
-    style.encode("lightskyblue"); // "lightskyblue"
-
-Encoding is necessary because a fragment's "class" property doubles as its identifier. A class must therefore derive from the arguments passed to the factory which produced it, and these could contain characters not permitted within a class.
-
-### style.classes(_styler_)
-
-The __classes__ function invokes the _styler_ and returns an array containing the class of each fragment.
-
-    style.classes(style_centered_button); // ["u0_button", "u3_centered"]
 
 ### style.context(_inserter_) → requirer(_styler_) → releaser()
 

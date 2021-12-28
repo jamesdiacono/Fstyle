@@ -23,16 +23,25 @@ function resolve(value) {
     );
 }
 
-const rx_regular = /^[a-zA-Z0-9_\-]$/;
+const rx_class_character = /^[a-zA-Z0-9_\-]$/;
 function encode(value) {
 
-// We use the Array.from function to split the string into glyphs. This keeps
-// any surrogate pairs together.
+// The 'encode' function encodes a 'value' as a string which is safe to append
+// on to a CSS class name.
 
-    return Array.from(
-        String(resolve(value))
-    ).map(function (glyph) {
-        if (rx_regular.test(glyph)) {
+//      style.encode("10%");          // "10\\000025"
+//      style.encode("lightskyblue"); // "lightskyblue"
+
+// Encoding is necessary because a fragment's "class" property doubles as its
+// identifier. A class must therefore derive deterministically from the
+// arguments passed to the factory which produced it, and these could very well
+// contain characters not permitted within a class.
+
+// The Array.from function splits the string into glyphs, keeping any surrogate
+// pairs intact.
+
+    return Array.from(String(value)).map(function (glyph) {
+        if (rx_class_character.test(glyph)) {
             return glyph;
         }
 
@@ -55,64 +64,92 @@ function encode(value) {
     }).join("");
 }
 
-const rx_placeholder = /<([^<>\s]+)>/g;
-function fragment(class_name, rules, substitutions) {
+const rx_named_placeholder = /<([^<>\s]+)>/g;
+function place(name, template, substitutions) {
+
+// The 'place' function makes a fragment from a 'template'.
+
+    const replacements = {};
     function replacer(ignore, placeholder) {
-        let replacement;
         if (typeof substitutions === "function") {
 
 // If 'substitutions' is a function, it is called with the placeholder and the
 // return value is used as the replacement.
 
-            replacement = substitutions(placeholder);
+            replacements[placeholder] = substitutions(placeholder);
         } else {
 
 // Otherwise, 'substitutions' is inspected for a matching property.
 
             if (Object.keys(substitutions).includes(placeholder)) {
-                replacement = resolve(substitutions[placeholder]);
+                replacements[placeholder] = resolve(substitutions[placeholder]);
             }
         }
         if (
-            typeof replacement !== "string"
-            && typeof replacement !== "number"
+            typeof replacements[placeholder] !== "string"
+            && typeof replacements[placeholder] !== "number"
         ) {
 
 // A suitable replacement was not found. This is a mistake.
 
-            throw new Error("Unreplaceable <" + placeholder + ">.");
+            throw new Error("Unplaceable <" + placeholder + ">.");
         }
-        return replacement;
+        return replacements[placeholder];
     }
-    return function fragment_styler() {
-        return [{
-            class: resolve(class_name),
-            rules: (
-
-// If substitutions are provided, the 'rules' string is treated as a template.
-// Otherwise, the 'rules' are used verbatim.
-
-                substitutions !== undefined
-                ? rules.replace(rx_placeholder, replacer)
-                : rules
+    const rules = template.replace(rx_named_placeholder, replacer);
+    return {
+        class: (
+            typeof name === "string"
+            ? Object.values(replacements).reduce(
+                function hone(class_name, replacement) {
+                    return class_name + "_" + encode(replacement);
+                },
+                name
             )
-        }];
+            : (
+                typeof name === "function"
+                ? name()
+                : name.map(resolve).map(encode).join("_")
+            )
+        ),
+        rules
     };
 }
 
-function rule(class_name, declarations, substitutions) {
-    const fragment_styler = fragment(class_name, declarations, substitutions);
+function rule(name, declarations, substitutions) {
     return function rule_styler() {
-        const fragments = fragment_styler();
+        if (substitutions === undefined) {
+            return [{
+                class: name,
+                rules: "." + name + "{" + declarations + "}"
+            }];
+        }
+        const the_fragment = place(name, declarations, substitutions);
 
-// Wrapping the declarations in a class selector makes a rule.
+// The fragment's "rules" property actually just contains declarations. Wrap it
+// in a class selector to make the rule.
 
-        fragments[0].rules = (
-            "." + resolve(class_name) + " {"
-            + fragments[0].rules
+        the_fragment.rules = (
+            "." + the_fragment.class + "{"
+            + the_fragment.rules
             + "}"
         );
-        return fragments;
+        return [the_fragment];
+    };
+}
+
+const rx_class_placeholder = /<>/g;
+function fragment(name, rules, substitutions = {}) {
+    return function fragment_styler() {
+        const the_fragment = place(name, rules, substitutions);
+
+// Replace occurrences of the empty placeholder with the generated class.
+
+        the_fragment.rules = the_fragment.rules.replace(
+            rx_class_placeholder,
+            the_fragment.class
+        );
+        return [the_fragment];
     };
 }
 
@@ -245,13 +282,12 @@ function classes(styler) {
 
 export default Object.freeze({
     uniqify,
+    classes,
     rule,
     fragment,
     mix,
     none,
     resolve,
-    encode,
-    classes,
     context,
     domsert
 });
