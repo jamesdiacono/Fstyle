@@ -76,13 +76,6 @@ An object containing some useful functions is exported by fstyle.js:
 
     import style from "./fstyle.js";
 
-### style.uniqify(_name_)
-
-The __uniqify__ function takes a meaningful _name_ string. It returns a string which incorporates _name_, yet is guaranteed to be unique. The returned string is a valid class only if _name_ is a valid class.
-
-    style.uniqify("potato"); // "u0_potato"
-    style.uniqify("potato"); // "u1_potato"
-
 ### style.classes(_styler_)
 
 The __classes__ function invokes the _styler_ and returns an array containing the class of each fragment.
@@ -93,9 +86,8 @@ The __classes__ function invokes the _styler_ and returns an array containing th
 
 The __rule__ factory makes a styler representing a single CSS rule. The styler will return an array containing a single fragment, consisting of the _declarations_ wrapped in a _class_ selector.
 
-    const centered_name = style.uniqify("centered");
     function style_centered() {
-        return style.rule(centered_name, `
+        return style.rule("centered", `
             position: fixed;
             top: 50%;
             left: 50%;
@@ -107,10 +99,9 @@ The __rule__ factory makes a styler representing a single CSS rule. The styler w
 
 Each placeholder found in the _declarations_template_ is replaced with a corresponding value taken from the _substitutions_. A placeholder has the form `<placeholder_name>`, where `placeholder_name` is any non-empty string devoid of whitespace.
 
-    const link_name = style.uniqify("link");
     function style_link(color) {
         return style.rule(
-            link_name,
+            "link",
             `
                 font-weight: bold;
                 color: <color>;
@@ -125,8 +116,8 @@ The `style_link` factory above can take a color string, yet it can also take a f
 
 If the _name_ parameter is a string, it serves as a starting point for generating the class. Each replacement used by the _declarations_template_ is appended, yielding a class which uniquely identifies the fragment. Characters not permitted within a class are encoded.
 
-    style.classes(style_link("red")); // ["u2_link_red"]
-    style.classes(style_link("#fff")); // ["u2_link_\\000023fff"]
+    style.classes(style_link("red")); // ["link_red"]
+    style.classes(style_link("#fff")); // ["link_\\000023fff"]
 
 The _name_ parameter may also be an array. Its elements are resolved, encoded and concatenated together to yield the class. This approach provides more control over the class, but introduces some risk that the class might not uniquely identify its rules. Alternatively, the _name_ parameter may be a function which returns the class directly.
 
@@ -134,10 +125,9 @@ The _name_ parameter may also be an array. Its elements are resolved, encoded an
 
 The __fragment__ factory makes a styler which returns an array containing a single fragment. It processes the _rules_template_ with the _substitutions_ similarly to how `style.rule` does, and then replaces each occurrence of the empty placeholder `<>` with the generated class. The _substitutions_ parameter is optional.
 
-    const spinner_name = style.uniqify("spinner");
     function style_spinner(color, duration) {
         return style.fragment(
-            spinner_name,
+            "spinner",
             `
                 @keyframes <> {
                     0% {
@@ -179,8 +169,8 @@ Stylers containing conflicting declarations should not be mixed. Attempting to d
             style.rule("green", "color: green;")
         ]);
     }
-    function style_fixed(color) {
-        return style.rule("coloured", "color: <color>;", {color});
+    function style_repaired(color) {
+        return style.rule("colorful", "color: <color>;", {color});
     }
 
 ### style.none()
@@ -195,16 +185,34 @@ The __none__ factory makes a styler which returns an empty array.
         );
     }
 
+### style.name(_factory_)
+
+It is important that the _name_ parameter passed to the `style.rule` and `style.fragment` factories is unique, otherwise the classes of distinct fragments might collide. _Fstyle_ provides a convenient way of generating names which are both meaningful and unique.
+
+The __name__ function returns a string which identifies a _factory_ function. The _factory_ is not invoked, only examined.
+
+    function style_loud() {
+        return style.rule(
+            style.name(style_loud),
+            "text-transform: uppercase;"
+        );
+    }
+    style.name(style_loud); // "style_loud_kokVpI"
+
+The returned string is a class which incorporates the name of the _factory_, but is actually unique to the _factory_'s object reference. The _factory_ may even be anonymous. The same string is always returned for a given _factory_.
+
+    style.name(style_button); // "style_button_TSd5WU"
+    style.name(style_button); // "style_button_TSd5WU"
+
 ### style.resolve(_value_)
 
 The __resolve__ function takes a _value_. If that _value_ is a function, then it is called to produce the return value. Otherwise, the _value_ is the return value.
 
-In the following example, `resolve` is used in a factory which does not care whether its `highlighted` parameter is a boolean, or a function which returns a boolean. The returned styler will be reactive if `highlighted` is reactive.
+In the following example, `style.resolve` is used in a factory which does not care whether its `highlighted` parameter is a boolean, or a function which returns a boolean. The returned styler will be reactive if `highlighted` is reactive.
 
-    const snippet_name = style.uniqify("snippet");
     function style_snippet(highlighted) {
         return style.rule(
-            snippet_name,
+            "snippet",
             `
                 background-color: <background_color>;
                 font-family: monospace;
@@ -258,7 +266,7 @@ We create a cell to hold the element's width in pixels. A "cell" is a reactive f
 
 We set up a `ResizeObserver`, which updates `width_cell` whenever the element is resized.
 
-    const width_observer = new window.ResizeObserver(
+    const width_observer = new ResizeObserver(
         function on_resize(entries) {
             width_cell(entries[0].contentRect.width);
         }

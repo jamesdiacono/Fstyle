@@ -1,27 +1,8 @@
 // fstyle.js
 // James Diacono
-// 2021-12-18
+// 2022-02-18
 
 /*jslint browser */
-
-let counter = 0;
-function uniqify(name) {
-
-// We could use randomness, but counters make more readable names. A counter
-// should provide uniqueness for the lifetime of the running application.
-
-    name = "u" + counter + "_" + name;
-    counter += 1;
-    return name;
-}
-
-function resolve(value) {
-    return (
-        typeof value === "function"
-        ? value()
-        : value
-    );
-}
 
 const rx_class_character = /^[a-zA-Z0-9_\-]$/;
 function encode(value) {
@@ -29,8 +10,8 @@ function encode(value) {
 // The 'encode' function encodes a 'value' as a string which is safe to append
 // on to a CSS class name.
 
-//      style.encode("10%");          // "10\\000025"
-//      style.encode("lightskyblue"); // "lightskyblue"
+//      encode("10%");          // "10\\000025"
+//      encode("lightskyblue"); // "lightskyblue"
 
 // Encoding is necessary because a fragment's "class" property doubles as its
 // identifier. A class must therefore derive deterministically from the
@@ -62,6 +43,14 @@ function encode(value) {
             + unicode_hex
         );
     }).join("");
+}
+
+function resolve(value) {
+    return (
+        typeof value === "function"
+        ? value()
+        : value
+    );
 }
 
 const rx_named_placeholder = /<([^<>\s]+)>/g;
@@ -121,7 +110,7 @@ function rule(name, declarations, substitutions) {
         if (substitutions === undefined) {
             return [{
                 class: name,
-                rules: "." + name + "{" + declarations + "}"
+                rules: "." + name + " {" + declarations + "}"
             }];
         }
         const the_fragment = place(name, declarations, substitutions);
@@ -130,7 +119,7 @@ function rule(name, declarations, substitutions) {
 // in a class selector to make the rule.
 
         the_fragment.rules = (
-            "." + the_fragment.class + "{"
+            "." + the_fragment.class + " {"
             + the_fragment.rules
             + "}"
         );
@@ -153,12 +142,13 @@ function fragment(name, rules, substitutions = {}) {
     };
 }
 
+function smush(fragments, styler) {
+    return styler().concat(fragments);
+}
+
 function mix(styler_array) {
-    function flatten(fragments, styler) {
-        return styler().concat(fragments);
-    }
     return function mix_styler() {
-        return styler_array.reduce(flatten, []);
+        return styler_array.reduce(smush, []);
     };
 }
 
@@ -174,7 +164,7 @@ function domsert(fragment) {
 // distinguish between them when debugging.
 
     style_element.setAttribute("data-fragment", fragment.class);
-    style_element.innerHTML = fragment.rules.replace(
+    style_element.textContent = fragment.rules.replace(
 
 // It is necessary to escape the backslash in any unicode escape sequences, so
 // that they are not interpreted by the HTML parser.
@@ -240,36 +230,37 @@ function context(inserter = domsert) {
             throw new Error("Bad rules.");
         }
         const requisite = requisites[fragment.class] || {
-            count: 0,
+            handles: [],
             rules: fragment.rules
         };
         if (fragment.rules !== requisite.rules) {
 
 // The class does not uniquely identify its rules. It is not safe to continue.
 
-            throw new Error("Rules must not change.");
+            throw new Error("Fragment changed: " + fragment.class + ".");
         }
-        requisite.count += 1;
-        if (requisite.count === 1) {
+        const handle = {};
+        requisite.handles.push(handle);
+        if (requisite.handles.length === 1) {
             requisite.remove = inserter(fragment);
         }
         requisites[fragment.class] = requisite;
-    }
-    function release_fragment(fragment) {
-        const requisite = requisites[fragment.class];
-        if (requisite !== undefined) {
-            requisite.count -= 1;
-            if (requisite.count === 0) {
-                requisite.remove();
-                delete requisites[fragment.class];
+        return function release_fragment() {
+            const handle_nr = requisite.handles.indexOf(handle);
+            if (handle_nr !== -1) {
+                requisite.handles.splice(handle_nr, 1);
+                if (requisite.handles.length === 0) {
+                    requisite.remove();
+                    delete requisites[fragment.class];
+                }
             }
-        }
+        };
     }
     return function require(styler) {
         const fragments = styler();
-        fragments.forEach(require_fragment);
+        const releasers = fragments.map(require_fragment);
         return function release() {
-            return fragments.forEach(release_fragment);
+            return releasers.forEach(resolve);
         };
     };
 }
@@ -280,14 +271,46 @@ function classes(styler) {
     });
 }
 
+const range = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function random_character() {
+    return range[Math.floor(Math.random() * range.length)];
+}
+
+function random_string(length) {
+    return new Array(length).fill().map(random_character).join("");
+}
+
+let names = new WeakMap();
+function name(factory) {
+    let string = names.get(factory);
+    if (string === undefined) {
+
+// We could use a counter to ensure uniqueness, but randomness is safer because
+// it does not require us to manage global state. Even if the application uses
+// multiple versions of this module, the generated names will remain unique
+// everywhere.
+
+// We can not rely on the factory name as a source of randomness, because
+// function names are often removed or shortened by minification. Usually, a
+// random string of four characters will protect against collisions in upwards
+// of 500 names. Five characters is good for 10,000 names, and six characters is
+// good for many more. In the interest of safety, and at the expense of
+// aesthetics, we use the longer string.
+
+        string = encode(factory.name) + "_" + random_string(6);
+        names.set(factory, string);
+    }
+    return string;
+}
+
 export default Object.freeze({
-    uniqify,
+    context,
+    domsert,
     classes,
     rule,
     fragment,
     mix,
     none,
-    resolve,
-    context,
-    domsert
+    name,
+    resolve
 });
