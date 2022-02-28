@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2022-02-21
+// 2022-02-28
 
 /*jslint browser */
 
@@ -37,7 +37,8 @@ function encode(value) {
             "\\"
 
 // The hex string can either be exactly 6 characters long, or terminated by a
-// space. The second option is dubious, so we pad the hex string with zeros.
+// space. The second option is likely to confuse, so we choose the first option
+// and pad the hex string with zeros.
 
             + new Array(6 - unicode_hex.length + 1).join("0")
             + unicode_hex
@@ -54,66 +55,64 @@ function resolve(value) {
 }
 
 const rx_named_placeholder = /<([^<>\s]+)>/g;
-function place(name, template, substitutions) {
+function place(name, template, substitutions, parameters, identifier) {
 
 // The 'place' function makes a fragment from a 'template'.
 
     const replacements = {};
-    function replacer(ignore, placeholder) {
-        if (typeof substitutions === "function") {
+    const rules = template.replace(
+        rx_named_placeholder,
+        function replacer(ignore, placeholder) {
+            if (typeof substitutions === "function") {
 
 // If 'substitutions' is a function, it is called with the placeholder and the
 // return value is used as the replacement.
 
-            replacements[placeholder] = substitutions(placeholder);
-        } else {
+                replacements[placeholder] = substitutions(placeholder);
+            } else if (substitutions[placeholder] !== undefined) {
 
 // Otherwise, 'substitutions' is inspected for a matching property.
 
-            if (Object.keys(substitutions).includes(placeholder)) {
                 replacements[placeholder] = resolve(substitutions[placeholder]);
             }
-        }
-        if (
-            typeof replacements[placeholder] !== "string"
-            && typeof replacements[placeholder] !== "number"
-        ) {
+            if (
+                typeof replacements[placeholder] !== "string"
+                && typeof replacements[placeholder] !== "number"
+            ) {
 
 // A suitable replacement was not found. This is a mistake.
 
-            throw new Error("Unplaceable <" + placeholder + ">.");
+                throw new Error("Unreplaceable <" + placeholder + ">.");
+            }
+            return replacements[placeholder];
         }
-        return replacements[placeholder];
+    );
+    if (parameters === undefined) {
+        parameters = Object.values(replacements);
     }
-    const rules = template.replace(rx_named_placeholder, replacer);
     return {
-        class: (
-            typeof name === "string"
-            ? Object.values(replacements).reduce(
-                function hone(class_name, replacement) {
-                    return class_name + "_" + encode(replacement);
-                },
-                name
-            )
-            : (
-                typeof name === "function"
-                ? name()
-                : name.map(resolve).map(encode).join("_")
-            )
+        class: [
+            identifier(name)
+        ].concat(
+            parameters.map(resolve)
+        ).map(
+            encode
+        ).join(
+            "_"
         ),
         rules
     };
 }
 
-function rule(name, declarations, substitutions) {
-    return function rule_styler() {
-        if (substitutions === undefined) {
-            return [{
-                class: name,
-                rules: "." + name + " {" + declarations + "}"
-            }];
-        }
-        const the_fragment = place(name, declarations, substitutions);
+function rule(name, declarations, substitutions, parameters) {
+    return function rule_styler(identifier) {
+        const the_fragment = place(
+            name,
+            declarations,
+            substitutions,
+            parameters,
+            identifier
+        );
 
 // The fragment's "rules" property actually just contains declarations. Wrap it
 // in a class selector to make the rule.
@@ -128,9 +127,15 @@ function rule(name, declarations, substitutions) {
 }
 
 const rx_class_placeholder = /<>/g;
-function fragment(name, rules, substitutions = {}) {
-    return function fragment_styler() {
-        const the_fragment = place(name, rules, substitutions);
+function fragment(name, rules, substitutions, parameters) {
+    return function fragment_styler(identifier) {
+        const the_fragment = place(
+            name,
+            rules,
+            substitutions,
+            parameters,
+            identifier
+        );
 
 // Replace occurrences of the empty placeholder with the generated class.
 
@@ -142,13 +147,14 @@ function fragment(name, rules, substitutions = {}) {
     };
 }
 
-function smush(fragments, styler) {
-    return styler().concat(fragments);
-}
-
 function mix(styler_array) {
-    return function mix_styler() {
-        return styler_array.reduce(smush, []);
+    return function mix_styler(identifier) {
+        return styler_array.reduce(
+            function (fragments, styler) {
+                return fragments.concat(styler(identifier));
+            },
+            []
+        );
     };
 }
 
@@ -211,14 +217,42 @@ function domsert(fragment) {
     };
 }
 
+function identify() {
+    let names = new WeakMap();
+    let counter = 0;
+    return function identifier(value) {
+        if (typeof value === "string") {
+
+// The value is a string. It is the responsibility of the caller to ensure that
+// it is unique.
+
+            return value;
+        }
+
+// The value is a function. Check if we have already generated a name for it,
+// and if not, ensure a unique name by incrementing a counter.
+
+        if (names.has(value)) {
+            return names.get(value);
+        }
+        const name = "u" + counter + "_" + value.name;
+        counter += 1;
+        names.set(value, name);
+        return name;
+    };
+}
+
 // A valid class starts with a letter or underbar. Leading hyphens are reserved
 // for browser implementations, so we do permit them. Subsequent characters may
 // include letters, numbers, underbars, hyphens or unicode escape sequences. A
 // unicode escape sequence is a backslash followed by 6 hexadecimal characters.
 
 const rx_class = /^[_a-zA-Z](?:[_a-zA-Z0-9\-]|\\[0-9A-F]{6})*$/;
-function context(inserter = domsert) {
-    const requisites = Object.create(null);
+function context(
+    inserter = domsert,
+    identifier = identify()
+) {
+    let requisites = Object.create(null);
     function require_fragment(fragment) {
         if (
             typeof fragment.class !== "string"
@@ -230,7 +264,7 @@ function context(inserter = domsert) {
             throw new Error("Bad rules.");
         }
         const requisite = requisites[fragment.class] || {
-            handles: [],
+            references: [],
             rules: fragment.rules
         };
         if (fragment.rules !== requisite.rules) {
@@ -239,17 +273,17 @@ function context(inserter = domsert) {
 
             throw new Error("Fragment changed: " + fragment.class + ".");
         }
-        const handle = {};
-        requisite.handles.push(handle);
-        if (requisite.handles.length === 1) {
+        const reference = {};
+        requisite.references.push(reference);
+        if (requisite.references.length === 1) {
             requisite.remove = inserter(fragment);
         }
         requisites[fragment.class] = requisite;
         return function release_fragment() {
-            const handle_nr = requisite.handles.indexOf(handle);
-            if (handle_nr !== -1) {
-                requisite.handles.splice(handle_nr, 1);
-                if (requisite.handles.length === 0) {
+            const reference_nr = requisite.references.indexOf(reference);
+            if (reference_nr !== -1) {
+                requisite.references.splice(reference_nr, 1);
+                if (requisite.references.length === 0) {
                     requisite.remove();
                     delete requisites[fragment.class];
                 }
@@ -257,60 +291,26 @@ function context(inserter = domsert) {
         };
     }
     return function require(styler) {
-        const fragments = styler();
+        const fragments = styler(identifier);
         const releasers = fragments.map(require_fragment);
-        return function release() {
-            return releasers.forEach(resolve);
+        return {
+            classes: fragments.map(function (fragment) {
+                return fragment.class;
+            }),
+            release() {
+                return releasers.forEach(resolve);
+            }
         };
     };
-}
-
-function classes(styler) {
-    return styler().map(function (fragment) {
-        return fragment.class;
-    });
-}
-
-const range = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-function random_character() {
-    return range[Math.floor(Math.random() * range.length)];
-}
-
-function random_string(length) {
-    return new Array(length).fill().map(random_character).join("");
-}
-
-let names = new WeakMap();
-function name(factory) {
-    let string = names.get(factory);
-    if (string === undefined) {
-
-// We could use a counter to ensure uniqueness, but randomness is safer because
-// it does not require us to manage global state. Even if the application uses
-// multiple versions of this module, the generated names will remain unique
-// everywhere.
-
-// We can not rely on the factory name as a source of randomness, because
-// function names are often removed or shortened by minification. Usually, a
-// random string of four characters will protect against collisions in upwards
-// of 500 names. Five characters is good for 10,000 names, and six characters is
-// good for many more. In the interest of safety, and at the expense of
-// aesthetics, we use the longer string.
-
-        string = encode(factory.name) + "_" + random_string(6);
-        names.set(factory, string);
-    }
-    return string;
 }
 
 export default Object.freeze({
     context,
     domsert,
-    classes,
+    identify,
     rule,
     fragment,
     mix,
     none,
-    name,
     resolve
 });
