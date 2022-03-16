@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2022-02-28
+// 2022-03-13
 
 /*jslint browser */
 
@@ -46,16 +46,8 @@ function encode(value) {
     }).join("");
 }
 
-function resolve(value) {
-    return (
-        typeof value === "function"
-        ? value()
-        : value
-    );
-}
-
 const rx_named_placeholder = /<([^<>\s]+)>/g;
-function place(name, template, substitutions, parameters, identifier) {
+function place(name, template, substitutions, parameters, identify, resolve) {
 
 // The 'place' function makes a fragment from a 'template'.
 
@@ -92,7 +84,7 @@ function place(name, template, substitutions, parameters, identifier) {
     }
     return {
         class: [
-            identifier(name)
+            identify(name)
         ].concat(
             parameters.map(resolve)
         ).map(
@@ -105,13 +97,13 @@ function place(name, template, substitutions, parameters, identifier) {
 }
 
 function rule(name, declarations, substitutions, parameters) {
-    return function rule_styler(identifier) {
+    return function rule_styler(...args) {
         const the_fragment = place(
             name,
             declarations,
             substitutions,
             parameters,
-            identifier
+            ...args
         );
 
 // The fragment's "rules" property actually just contains declarations. Wrap it
@@ -128,13 +120,13 @@ function rule(name, declarations, substitutions, parameters) {
 
 const rx_class_placeholder = /<>/g;
 function fragment(name, rules, substitutions, parameters) {
-    return function fragment_styler(identifier) {
+    return function fragment_styler(...args) {
         const the_fragment = place(
             name,
             rules,
             substitutions,
             parameters,
-            identifier
+            ...args
         );
 
 // Replace occurrences of the empty placeholder with the generated class.
@@ -148,10 +140,10 @@ function fragment(name, rules, substitutions, parameters) {
 }
 
 function mix(styler_array) {
-    return function mix_styler(identifier) {
+    return function mix_styler(...args) {
         return styler_array.reduce(
             function (fragments, styler) {
-                return fragments.concat(styler(identifier));
+                return fragments.concat(styler(...args));
             },
             []
         );
@@ -217,7 +209,7 @@ function domsert(fragment) {
     };
 }
 
-function identify() {
+function identiref() {
     let names = new WeakMap();
     let counter = 0;
     return function identifier(value) {
@@ -248,11 +240,10 @@ function identify() {
 // unicode escape sequence is a backslash followed by 6 hexadecimal characters.
 
 const rx_class = /^[_a-zA-Z](?:[_a-zA-Z0-9\-]|\\[0-9A-F]{6})*$/;
-function context(
-    inserter = domsert,
-    identifier = identify()
-) {
-    let requisites = Object.create(null);
+function context(capabilities = {}) {
+    const insert = capabilities.insert || domsert;
+    const identify = capabilities.identify || identiref();
+    const requisitions = Object.create(null);
     function require_fragment(fragment) {
         if (
             typeof fragment.class !== "string"
@@ -263,54 +254,74 @@ function context(
         if (typeof fragment.rules !== "string") {
             throw new Error("Bad rules.");
         }
-        const requisite = requisites[fragment.class] || {
-            references: [],
-            rules: fragment.rules
-        };
-        if (fragment.rules !== requisite.rules) {
+
+// Each time a fragment is required, a reference is stored in the appropriate
+// 'requisition' object. References are discarded when their corresponding
+// releaser function is invoked. When a requisition runs out of references, the
+// fragment is removed.
+
+        const reference = {};
+        let requisition = requisitions[fragment.class];
+        if (requisition === undefined) {
+            requisition = {
+                rules: fragment.rules,
+                remove: insert(fragment),
+                references: [reference]
+            };
+        } else {
+            if (fragment.rules !== requisition.rules) {
 
 // The class does not uniquely identify its rules. It is not safe to continue.
 
-            throw new Error("Fragment changed: " + fragment.class + ".");
+                throw new Error("Rules changed for " + fragment.class + ".");
+            }
+            requisition.references.push(reference);
         }
-        const reference = {};
-        requisite.references.push(reference);
-        if (requisite.references.length === 1) {
-            requisite.remove = inserter(fragment);
-        }
-        requisites[fragment.class] = requisite;
+        requisitions[fragment.class] = requisition;
         return function release_fragment() {
-            const reference_nr = requisite.references.indexOf(reference);
+            const reference_nr = requisition.references.indexOf(reference);
             if (reference_nr !== -1) {
-                requisite.references.splice(reference_nr, 1);
-                if (requisite.references.length === 0) {
-                    requisite.remove();
-                    delete requisites[fragment.class];
+                requisition.references.splice(reference_nr, 1);
+                if (requisition.references.length === 0) {
+                    requisition.remove();
+                    delete requisitions[fragment.class];
                 }
             }
         };
     }
+    function resolve(value) {
+        return (
+            typeof value === "function"
+            ? value(resolve)
+            : (
+                capabilities.resolve !== undefined
+                ? capabilities.resolve(value)
+                : value
+            )
+        );
+    }
     return function require(styler) {
-        const fragments = styler(identifier);
+        const fragments = styler(identify, resolve);
         const releasers = fragments.map(require_fragment);
         return {
             classes: fragments.map(function (fragment) {
                 return fragment.class;
             }),
             release() {
-                return releasers.forEach(resolve);
+                return releasers.forEach(function (releaser) {
+                    releaser();
+                });
             }
         };
     };
 }
 
 export default Object.freeze({
-    context,
-    domsert,
-    identify,
     rule,
     fragment,
     mix,
     none,
-    resolve
+    context,
+    domsert,
+    identiref
 });
