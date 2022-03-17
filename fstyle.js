@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2022-03-13
+// 2022-03-18
 
 /*jslint browser */
 
@@ -47,7 +47,7 @@ function encode(value) {
 }
 
 const rx_named_placeholder = /<([^<>\s]+)>/g;
-function place(name, template, substitutions, parameters, identify, resolve) {
+function place(name, template, substitutions, parameters, resolve, identify) {
 
 // The 'place' function makes a fragment from a 'template'.
 
@@ -301,7 +301,7 @@ function context(capabilities = {}) {
         );
     }
     return function require(styler) {
-        const fragments = styler(identify, resolve);
+        const fragments = styler(resolve, identify);
         const releasers = fragments.map(require_fragment);
         return {
             classes: fragments.map(function (fragment) {

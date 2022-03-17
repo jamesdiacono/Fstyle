@@ -1,6 +1,6 @@
 # Fstyle
 
-_Fstyle_ is a functional approach to styling web applications. _Fstyle_ lets you parameterise arbitrary CSS, improving modularity without sacrificing control. When _Fstyle_ is used in conjuction with a reactivity system, styles can change dynamically.
+_Fstyle_ is a functional approach to styling web applications. _Fstyle_ lets you parameterise arbitrary CSS, improving modularity without sacrificing control. When _Fstyle_ is used in conjuction with a reactivity system, styles can <a href="https://james.diacono.com.au/using_fstyle.html">change dynamically</a>.
 
 _Fstyle_ is in the Public Domain.
 
@@ -75,6 +75,15 @@ and
 An object containing some useful functions is exported by fstyle.js:
 
     import fstyle from "./fstyle.js";
+    const {
+        rule,
+        fragment,
+        mix,
+        none,
+        context,
+        domsert,
+        identiref
+    } = fstyle;
 
 ### fstyle.rule(_name_, _declarations_)
 
@@ -253,7 +262,19 @@ The built-in resolver expects reactive values to be represented as functions. A 
         );
     }
 
-The `snippet` factory does not care whether its `highlighted` parameter is a boolean, or represents a boolean. The returned styler will be reactive if `highlighted` is reactive. Factories written in this way are portable across different reactivity systems.
+The `snippet` factory does not care whether its `highlighted` parameter is a boolean, or represents a boolean. The returned styler will be reactive if `highlighted` is reactive. As another example, the `if_else` factory is a control structure for stylers. It can take a reactive `condition` parameter.
+
+    function if_else(condition, if_styler, else_styler) {
+        return function if_else_styler(resolve, ...rest) {
+            return (
+                resolve(condition)
+                ? if_styler(resolve, ...rest)
+                : else_styler(resolve, ...rest)
+            );
+        };
+    }
+
+Factories written in this way are portable across different reactivity systems.
 
 ### fstyle.domsert(_fragment_) → remover()
 
@@ -261,7 +282,7 @@ The __domsert__ function may be used in conjunction with `fstyle.context` when t
 
 ### fstyle.identiref() → identifier(_name_)
 
-The __identiref__ function returns an _identifier_ function which takes a string or function as the _name_ parameter and returns a string. This _identifier_ provides the default behaviour when `options.identify` is undefined.
+The __identiref__ function returns an _identifier_ function which takes a string or function as the _name_ parameter and returns a string. This _identifier_ provides the default behaviour when `capabilities.identify` is undefined.
 
 It is important to ensure that the _name_ parameter passed to `fstyle.rule` and `fstyle.fragment` is unique, otherwise the classes of unrelated stylers might collide. It is tricky to ensure the uniqueness of _name_ strings across a large application, but the uniqueness of object references is guaranteed.
 
