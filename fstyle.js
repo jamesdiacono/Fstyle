@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2022-03-18
+// 2022-06-29
 
 /*jslint browser */
 
@@ -29,20 +29,14 @@ function encode(value) {
 // Most non-alphameric characters, like "." or "%", are only allowed in CSS
 // classes if they are escaped.
 
-        let unicode_hex = glyph.codePointAt(0).toString(16).toUpperCase();
-        return (
+        const unicode_hex = glyph.codePointAt(0).toString(16).toUpperCase();
 
-// The escape sequence begins with a single backslash.
+// The escape sequence begins with a single backslash. The hex string can either
+// be exactly 6 characters long, or terminated by a space. The second option is
+// likely to confuse, so we choose the first option and pad the hex string with
+// leading zeros.
 
-            "\\"
-
-// The hex string can either be exactly 6 characters long, or terminated by a
-// space. The second option is likely to confuse, so we choose the first option
-// and pad the hex string with zeros.
-
-            + new Array(6 - unicode_hex.length + 1).join("0")
-            + unicode_hex
-        );
+        return "\\" + unicode_hex.padStart(6, "0");
     }).join("");
 }
 
@@ -196,16 +190,7 @@ function domsert(fragment) {
         );
     }
     return function remover() {
-        if (style_element.parentElement) {
-
-// It is possible that document.head has been replaced since the element was
-// inserted. In such a case, calling document.head.removeChild(style_element)
-// raises an exception because style_element is no longer a child of
-// document.head. To be on the safe side, the style element is removed from
-// whichever parent it has now.
-
-            style_element.parentElement.removeChild(style_element);
-        }
+        style_element.remove();
     };
 }
 
@@ -235,9 +220,10 @@ function identiref() {
 }
 
 // A valid class starts with a letter or underbar. Leading hyphens are reserved
-// for browser implementations, so we do permit them. Subsequent characters may
-// include letters, numbers, underbars, hyphens or unicode escape sequences. A
-// unicode escape sequence is a backslash followed by 6 hexadecimal characters.
+// for browser implementations, so we do not permit them. Subsequent characters
+// may include letters, numbers, underbars, hyphens or unicode escape sequences.
+// A unicode escape sequence is a backslash followed by 6 hexadecimal
+// characters.
 
 const rx_class = /^[_a-zA-Z](?:[_a-zA-Z0-9\-]|\\[0-9A-F]{6})*$/;
 function context(capabilities = {}) {
