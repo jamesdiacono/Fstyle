@@ -1,367 +1,424 @@
 # Fstyle
 
-_Fstyle_ is a functional approach to styling web applications. _Fstyle_ lets you parameterise arbitrary CSS, improving modularity without sacrificing control. When _Fstyle_ is used in conjuction with a reactivity system, styles can <a href="https://james.diacono.com.au/using_fstyle.html">change dynamically</a>.
+_Fstyle_ is a JavaScript library that lets you parameterize fragments of
+arbitrary CSS, compose them together, and use them to dynamically style web
+applications.
+
+Styles defined using _Fstyle_ are
+[not tied](https://james.diacono.com.au/using_fstyle.html) to any particular
+framework, so they can be very portable. The rationale for _Fstyle_'s approach
+is given in the blog post
+[Styling Web Applications](https://james.diacono.com.au/styling_web_applications.html).
 
 _Fstyle_ is in the Public Domain.
 
-_Fstyle_ specifies the signature of a special kind of function, called a __styler__. A styler returns an array of fragments.
+The following examples demonstrate how _Fstyle_ might be used to style a trivial
+web application.
 
-A __fragment__ represents an aspect of the appearance or behaviour of a DOM element. Many different fragments may be applied to a single element, and a single fragment may be applied to many different elements. A fragment is an object containing two properties:
+```javascript
+import fstyle from "./fstyle.js";
 
-- `class`: A string consisting of a single CSS class name. A class must uniquely identify its rules.
-- `rules`: A string containing some CSS source code which affects only those elements assigned the class.
+// Two simple stylers are defined, each with a label and template.
 
-A __factory__ is any function which returns a styler function. The `button` factory below demonstrates how factories, stylers and fragments work together.
+const button_styler = fstyle.rule("button", `
+    border: 0.1em solid black;
+    color: gold;
+    background: fuchsia;
+    padding: 1em;
+`);
 
-    function button() {
-        return function button_styler() {
-            return [{
-                class: "my_button",
-                rules: `
-                    .my_button {
-                        border: 0.1em solid black;
-                        color: black;
-                        background: fuchsia;
-                        padding: 1em;
-                    }
-                    .my_button:active {
-                        background: cyan;
-                    }
-                `    
-            }];
-        };
-    }
+const centered_styler = fstyle.rule("centered", `
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+`);
 
-## A demonstration
+// The stylers are mixed together to form a composite styler.
 
-The following example demonstrates how _Fstyle_ might be used in a trivial web application.
+const centered_button_styler = fstyle.mix([button_styler, centered_styler]);
 
-Firstly, a new context is created. The context is responsible for injecting CSS into the page.
+// A context is created. It is responsible for injecting CSS fragments into the
+// page without duplication.
 
-    const require = fstyle.context();
+const context = fstyle.context();
 
-A styler is made and "required", causing its fragments to be inserted into the page.
+// We "require" the composite styler, obtaining a handle object.
 
-    const styler = button();
-    const handle = require(styler);
+const handle = context.require(centered_button_styler());
 
-The handle's classes are assigned to an element.
+// The handle's classes are assigned to an element.
 
-    const element = document.createElement("button");
-    element.innerText = "Fabulous";
-    element.className = handle.classes.join(" ");
-    document.body.appendChild(element);
+const button = document.createElement("button");
+button.textContent = "Fabulous";
+button.classList.add(...handle.classes);
+document.body.append(button);
+```
 
-The page now contains the elements
+The page now looks something like
 
+```html
+<head>
     <style>
-        .my_button {
+        .f0⎧button⎭ {
             border: 0.1em solid black;
             color: black;
             background: fuchsia;
             padding: 1em;
         }
-        .my_button:active {
-            background: cyan;
+    </style>
+    <style>
+        .f1⎧centered⎭ {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
         }
     </style>
+</head>
+<body>
+    <button class="f0⎧button⎭ f1⎧centered⎭">
+        Fabulous
+    </button>
+</body>
+```
 
-and
+`f0⎧button⎭` is a valid class. _Fstyle_ puts Unicode characters in classes to
+make them easier to read. This becomes especially important when stylers are
+parameterized.
 
-    <button class="my_button">Fabulous</button>
+The following styler takes two optional parameters, `enabled` and `selected`.
+Its `data` function transforms the parameters into values for the template.
+
+```javascript
+const tabber_styler = fstyle.rule(
+    "tabber",
+    `
+        color: <color>;
+        border: 2px solid <color>;
+        border-radius: 6px;
+        padding: 0.5em;
+        background: <background>;
+        opacity: <opacity>;
+    `,
+    function data({
+        disabled = false,
+        selected = false
+    }) {
+        return {
+            background: "black",
+            color: (
+                selected
+                ? "yellow"
+                : "white"
+            ),
+            opacity: (
+                disabled
+                ? 0.4
+                : 1
+            )
+        };
+    }
+);
+
+const handle = context.require(tabber_styler({
+    disabled: true,
+    selected: true
+}));
+
+const tabber = document.createElement("div");
+tabber.innerText = "My tabber";
+tabber.classList.add(...handle.classes);
+document.body.append(tabber);
+```
+
+The page might look something like
+
+```html
+<head>
+    <style>
+        .f2⎧tabber⎭·selected→true·disabled→true {
+            color: yellow;
+            border: 2px solid yellow;
+            border-radius: 6px;
+            padding: 0.5em;
+            background: black;
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="f2⎧tabber⎭·selected→true·disabled→true">
+        Tab me
+    </div>
+</body>
+```
+
+Yes, that is a still a valid class.
+
+## Stylers
+
+### styler(_parameters_) → requireable
+
+A __styler__ is any function that takes an optional _parameters_ object, and
+returns a __requireable__. A requireable is an opaque value representing zero
+or more fragments of CSS, and is meant to be passed to `context.require`.
+
+Stylers are usually invoked at the moment they are required:
+
+```javascript
+const handle = context.require(styler(parameters));
+```
 
 ## The functions
 
 An object containing some useful functions is exported by fstyle.js:
 
-    import fstyle from "./fstyle.js";
-    const {
-        rule,
-        fragment,
-        mix,
-        none,
-        context,
-        domsert,
-        identiref
-    } = fstyle;
+```javascript
+import fstyle from "./fstyle.js";
+```
 
-### fstyle.rule(_name_, _declarations_)
+### fstyle.rule(_label_, _template_, _data_)
 
-The __rule__ factory makes a styler representing a single CSS rule.
+The __rule__ function makes a styler representing a single CSS ruleset.
+The _label_ string is incorporated into the generated class to aid debugging.
 
-    function centered() {
-        return fstyle.rule("centered", `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        `);
-    }
+Each placeholder in the _template_ will be replaced by a value, either a string
+or a number. A placeholder takes the form `<name>`, where `name` is any
+non-empty string devoid of whitespace.
 
-The styler will return an array containing a single fragment, consisting of the _declarations_ wrapped by the _name_.
+```javascript
+const link_styler = fstyle.rule("link", `
+    font-weight: bold;
+    color: <color>;
+`);
+```
 
-    [{
-        class: "centered",
-        rules: `
-            .centered {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
+The _template_ need not contain any placeholders. If it does have placeholders,
+how they are filled depends on the _data_ parameter.
+
+ _data_        | Behavior
+---------------|----------------------------------------------------------------
+ function      | The _data_ function is called with the parameters object and returns an object holding the values.
+ object        | The _data_ object holds the values, and any parameters are ignored.
+ undefined     | The parameters object holds the values.
+
+An exception is raised if a placeholder can not be filled. This could be because
+no matching value was found, or because the matching value is not a string or a
+number.
+
+The ruleset's class incorporates the names and values of the parameters.
+Characters not permitted within a class are safely escaped. For example,
+`link_styler` might produce the following CSS if `color` was `"red"`:
+
+```css
+.f3⎧link⎭·color→red {
+    color: red;
+}
+```
+
+### fstyle.fragment(_name_, _template_, _data_)
+
+The __fragment__ function makes a styler representing an arbitrary fragment of
+CSS. It processes the _template_ using the _data_ and parameters like
+`fstyle.rule` does, but then replaces each occurrence of the empty placeholder
+`<>` with the generated class.
+
+In the following example, the generated class is used both to identify a ruleset
+and an animation.
+
+```javascript
+const spinner_styler = fstyle.fragment(
+    "spinner",
+    `
+        @keyframes <> {
+            0% {
+                transform: rotate(0deg);
             }
-        `
-    }]
-
-### fstyle.rule(_name_, _declarations_, _substitutions_, _parameters_)
-
-Each placeholder found in the _declarations_ is replaced with a corresponding value taken from the _substitutions_. A placeholder has the form `<placeholder_name>`, where `placeholder_name` is any non-empty string devoid of whitespace.
-
-    function link(color) {
-        return fstyle.rule(
-            "link",
-            `
-                font-weight: bold;
-                color: <color>;
-            `,
-            {color}
-        );
-    }
-
-If _substitutions_ is a function, it is called with the placeholder name and returns the replacement. Otherwise, _substitutions_ is an object with placeholder names as keys, whose values are resolved to yield replacements. A replacement must be a string or a number.
-
-The _name_ parameter serves as the basis for the fragment's class. Each replacement used by the _declarations_ is appended, yielding a class which uniquely identifies the fragment. Calling
-
-    link("red")
-
-returns a styler which produces the fragment
-
-    {
-        class: "link_red",
-        rules: `
-            .link_red {
-                font-weight: bold;
-                color: red;
+            100% {
+                transform: rotate(360deg);
             }
-        `
+        }
+        .<> {
+            display: block;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            border-top: 4px solid <color>;
+            animation: <> <duration> linear infinite;
+        }
+    `,
+    {color, duration}
+);
+```
+
+Calling
+
+```javascript
+context.require(spinner_styler({color: "#a020f0", duration: "500ms"}))
+```
+
+might produce the following CSS:
+
+```css
+@keyframes f4⎧spinner⎭·color→＃a020f0·duration→500ms {
+    0% {
+        transform: rotate(0deg);
     }
-
-Characters not permitted within a class are encoded. For example, `link("#aabbcc")` yields the class `"link_\\000023aabbcc"`.
-
-The optional _parameters_ parameter provides more control over the class. It is an array whose elements are resolved and encoded before being appended to the _name_. This approach can improve the readability of classes in some situations, but care must be taken to ensure that they uniquely identify their rules.
-
-### fstyle.fragment(_name_, _rules_, _substitutions_, _parameters_)
-
-The __fragment__ factory makes a styler which returns an array containing a single fragment. It processes the _rules_ with the _substitutions_ similarly to how `fstyle.rule` does, and then replaces each occurrence of the empty placeholder `<>` with the generated class. The _substitutions_ and _parameters_ parameters are optional.
-
-    function spinner(color, duration) {
-        return fstyle.fragment(
-            "spinner",
-            `
-                @keyframes <> {
-                    0% {
-                        transform: rotate(0deg);
-                    }
-                    100% {
-                        transform: rotate(360deg);
-                    }
-                }
-                .<> {
-                    display: block;
-                    width: 20px;
-                    height: 20px;
-                    border-radius: 10px;
-                    border-top: 4px solid <color>;
-                    animation: <> <duration> linear infinite;
-                }
-            `,
-            {color, duration}
-        );
+    100% {
+        transform: rotate(360deg);
     }
+}
+.f4⎧spinner⎭·color→＃a020f0·duration→500ms {
+    display: block;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    border-top: 4px solid #a020f0;
+    animation: f4⎧spinner⎭·color→＃a020f0·duration→500ms 500ms linear infinite;
+}
+```
 
 ### fstyle.mix(_styler_array_)
 
-The __mix__ factory makes a styler which returns an array containing every fragment from every styler in the _styler_array_.
+The __mix__ function makes a styler that combines an array of stylers into a
+new styler.
 
-    function centered_link(color) {
-        return fstyle.mix([
-            centered(),
-            link(color)
-        ]);
+```javascript
+const centered_link_styler = fstyle.mix([centered_styler, link_styler]);
+```
+
+Stylers containing conflicting declarations should not be mixed. Attempting to
+do so results in unpredictable behaviour.
+
+```javascript
+const bad_styler = fstyle.mix([
+    fstyle.rule("red", "color: red;"),
+    fstyle.rule("green", "color: green;")
+]);
+```
+
+Each styler in _styler_array_ receives the same parameters object passed to the
+composite styler. Wrapper functions can be used to transform parameters before
+they are passed on.
+
+```javascript
+const inert_styler = fstyle.none();
+const spinning_link_styler = fstyle.mix([
+    function spinner_wrapper({animating}) {
+        return (
+            animating
+            ? spinner_styler({color: "pink", duration: "500ms"})
+            : inert_styler()
+        );
+    },
+    function link_wrapper({animating}) {
+        return link_styler({
+            color: (
+                animating
+                ? "limegreen"
+                : "black"
+            )
+        });
     }
+]);
+```
 
-Stylers containing conflicting declarations should not be mixed. Attempting to do so results in unpredictable behaviour.
-
-    function sometimes_red_sometimes_green() {
-        return fstyle.mix([
-            fstyle.rule("red", "color: red;"),
-            fstyle.rule("green", "color: green;")
-        ]);
-    }
+Notice that the wrapper functions above are themselves stylers, because they
+take a parameters object and return a requireable.
 
 ### fstyle.none()
 
-The __none__ factory makes a styler which returns an empty array.
+The __none__ function makes a styler that produces no classes or CSS. It was
+used in the preceeding example to do nothing when `animating` is false.
 
-    function maybe_centered() {
-        return (
-            Math.random() < 0.5
-            ? centered()
-            : fstyle.none()
-        );
-    }
+### fstyle.context(_spec_)
 
-### fstyle.context(_capabilities_) → requirer(_styler_)
+The __context__ function makes a context object, which manages the insertion and
+removal of CSS fragments without duplication. Generally, there should only be a
+single context per application.
 
-The __context__ function creates a new context, which manages the insertion and removal of fragments without duplication. Fragments are considered equal if their "class" properties are equal. Generally, there should be a single context per application.
+```javascript
+const context = fstyle.context();
+```
 
-A _requirer_ function is returned, which takes a _styler_. When called, the _requirer_ guarantees that the _styler_'s fragments remain available to the context until they are explicitly released.
+The _spec_ parameter, if provided, configures the context. It is an object
+containing any of the following properties:
 
-    const require = fstyle.context();
-    const handle = require(styler);
+#### spec.classify
+
+A function that generates a CSS class name that identifies a fragment of CSS.
+
+If `spec.classify` is omitted, `fstyle.development()` is used.
+
+#### spec.insert(_css_fragment_, _class_) → remove()
+
+A function that takes a fragment of CSS as a string and inserts it into the
+page. It also receives the _class_ associated with the fragment. It may return
+a _remove_ function, called to remove the fragment from the page.
+
+If `spec.insert` is omitted, `fstyle.domsert` is used.
+
+The context object returned by `fstyle.context` has two methods.
+
+#### context.require(_requireable_)
+
+Guarantees that a styler's CSS remains available on the page until explicitly
+released.
+
+```javascript
+const handle = context.require(link_styler());
+```
 
 The returned __handle__ is an object with the following properties:
 
-- `classes`: An array of strings. These are the classes of the styler's fragments.
+- `classes`: An array of class strings. Apply these immediately to any elements
+  that want styling.
 - `release`: The releaser function.
 
-If there comes a time when the _styler_ is no longer required, it should be released:
+If there comes a time when the handle is no longer needed, it can be released to
+conserve resources.
 
-    handle.release();
+```javascript
+handle.release();
+```
 
-The _capabilities_ parameter, if defined, should be an object containing any of the following capability functions:
+#### context.dispose()
 
-#### capabilities.insert(_fragment_) → remover()
+The __dispose__ function releases the context's handles and renders it
+inoperable.
 
-The __insert__ capability takes a fragment and inserts it into the context. It may return a _remover_ function, which removes the fragment from the context. If this capability is omitted, `fstyle.domsert` is used.
+```javascript
+context.dispose();
+```
 
-#### capabilities.identify(_name_)
+### fstyle.development() → classifier
+### fstyle.production () → classifier
 
-The __identify__ capability transforms the _name_ parameter of `fstyle.rule` and `fstyle.fragment` into a name string. If this capability is omitted, an identifier function made by `fstyle.identiref` is used.
+The __development__ and __production__ functions return a _classifier_ function,
+suitable for use as `spec.classify`.
 
-#### capabilities.resolve(_value_)
+```javascript
+const context = fstyle.context({
+    classify: fstyle.production()
+});
+```
 
-The __resolve__ capability is applied to members of the _substitutions_ and _parameters_ parameters (of `fstyle.rule` and `fstyle.fragment`). It "unwraps" and returns the _value_ if it is reactive, otherwise the _value_ is returned directly. This capability is used in conjunction with the built-in resolver.
+The development classifier produces highly readable classes but has a slight
+performance overhead. The production classifier produces less readable classes
+but aims to be safer and faster.
 
-The built-in resolver expects reactive values to be represented as functions. A function is unwrapped by invoking it, with the top-level resolver function itself passed as the only argument. This makes it possible to compose reactive values whilst remaining indifferent to their representation.
+Both classifiers incorporate the object reference of the styler function into
+the class. In example at the top of this document, there is an exact
+correspondance between `button_styler` and "f0", `centered_styler` and "f1",
+etc. This mechanism prevents classes from colliding even in huge applications,
+but also means that identical stylers should not be created more than once. For
+optimal performance, do not call `fstyle.rule` or `fstyle.fragment` within
+functions or loops.
 
-    function snippet(highlighted) {
-        function background_color(resolve) {
-            return (
-                resolve(highlighted)
-                ? "magenta"
-                : "transparent"
-            );
-        }
-        return fstyle.rule(
-            "snippet",
-            `
-                background-color: <background_color>;
-                font-family: monospace;
-            `,
-            {background_color}
-        );
-    }
+### fstyle.domsert(_css_fragment_, _class_) → remove()
 
-The `snippet` factory does not care whether its `highlighted` parameter is a boolean, or represents a boolean. The returned styler will be reactive if `highlighted` is reactive. As another example, the `if_else` factory is a control structure for stylers. It can take a reactive `condition` parameter.
-
-    function if_else(condition, if_styler, else_styler) {
-        return function if_else_styler(resolve, ...rest) {
-            return (
-                resolve(condition)
-                ? if_styler(resolve, ...rest)
-                : else_styler(resolve, ...rest)
-            );
-        };
-    }
-
-Factories written in this way are portable across different reactivity systems.
-
-### fstyle.domsert(_fragment_) → remover()
-
-The __domsert__ function may be used in conjunction with `fstyle.context` when the DOM is available. Each time it is called, a new style element is populated with the _fragment_'s rules and inserted into the head of the current document. It returns a _remover_ function which removes the style element.
-
-### fstyle.identiref() → identifier(_name_)
-
-The __identiref__ function returns an _identifier_ function which takes a string or function as the _name_ parameter and returns a string. This _identifier_ provides the default behaviour when `capabilities.identify` is undefined.
-
-It is important to ensure that the _name_ parameter passed to `fstyle.rule` and `fstyle.fragment` is unique, otherwise the classes of unrelated stylers might collide. It is tricky to ensure the uniqueness of _name_ strings across a large application, but the uniqueness of object references is guaranteed.
-
-When a function is passed as the _name_ parameter, it is not invoked. Rather, it is examined and a name string is derived. This name string is both meaningful and unique because it incorporates the function's object reference as well as its "name" property. Whilst it is possible to pass any function (even an anonymous function), it is most convenient to pass the factory function itself:
-
-    function centered_safe() {
-        return fstyle.rule(centered_safe, `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        `);
-    }
-
-Stylers returned by the `centered_safe` factory produce a fragment like
-
-    {
-        class: "u123_centered_safe",
-        rules: `
-            .u123_centered_safe {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-            }
-        `
-    }
-
-which has a class guaranteed to be unique within a given _Fstyle_ context.
-
-## Reactivity
-
-_Fstyle_ is compatible with any reactivity system. This will be demonstrated using a fictional reactivity library, consisting of two functions, `cell` and `watch`.
-
-    const {cell, watch} = make_reactiveness();
-
-In this example, we observe changes to an element's dimensions and restyle it accordingly. Firstly, we create an element and insert it into the DOM.
-
-    const element = document.createElement("div");
-    element.innerText = "My responsively styled element.";
-    document.body.appendChild(element);
-
-We create a cell to hold the element's width in pixels. A "cell" is an object with reactive `read` and `write` methods.
-
-    const width = cell();
-
-We set up a `ResizeObserver`, which updates `width` whenever the element is resized.
-
-    const width_observer = new ResizeObserver(
-        function on_resize(entries) {
-            width.write(entries[0].contentRect.width);
-        }
-    );
-    width_observer.observe(element);
-
-We define a factory which makes a reactive styler. The `responsive_styler` function is reactive because it accesses `width` when it is invoked.
-
-    function responsive() {
-        const narrow_styler = narrow();
-        const wide_styler = wide();
-        return function responsive_styler(...args) {
-            return (
-                width.read() > 640
-                ? wide_styler(...args)
-                : narrow_styler(...args)
-            );
-        };
-    }
-    const responsive_styler = responsive();
-
-We register a watcher which restyles the element whenever its width changes.
-
-    let handle;
-    watch(function watcher() {
-        if (handle !== undefined) {
-            handle.release();
-        }
-        handle = require(responsive_styler);
-        element.className = handle.classes.join(" ");
-    });
-
-The `watch` function knows to run the watcher every time `width` changes. This is because, within the watcher, the call to `require` invokes `responsive_styler` and hence accesses `width`.
+The __domsert__ function may be used in conjunction with `fstyle.context` when
+the DOM is available. Each time it is called, a new style element is populated
+with the _fragment_'s rules and inserted into the head of the current document.
+It returns a _remove_ function that removes the style element.

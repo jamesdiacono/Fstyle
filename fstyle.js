@@ -1,22 +1,50 @@
 // fstyle.js
 // James Diacono
-// 2022-06-29
+// 2023-05-07
 
 /*jslint browser */
 
-const rx_class_character = /^[a-zA-Z0-9_\-]$/;
+// A valid class starts with a letter or underbar. Each subsequent character is
+// a letter, number, underbar, hyphen, or U+00A0 and above.
+
+const rx_class_character = /^[a-zA-Z0-9\u00a0-\uffff_\-]$/;
+const rx_named_placeholder = /<([^<>\s]+)>/g;
+const rx_empty_placeholder = /<>/g;
+const rx_unicode_escape_sequence = /\\[0-9A-F]{6}/g;
+const rx_character = /./g;
+const lookalikes = {
+    ".": "\u2024", // One Dot Leader
+    "#": "\uff03", // Fullwidth Number Sign
+    "%": "\u2052", // Commercial Minus Sign
+    "(": "\u27ee", // Mathematical Left Flattened Parenthesis
+    ")": "\u27ef", // Mathematical Right Flattened Parenthesis
+    ",": "\u201a", // Single Low-9 Quotation Mark
+    " ": "\u2008"  // Punctuation Space
+};
+
+function spoof(string) {
+
+// ASCII symbols are not allowed in classes, but symbols commonly present in CSS
+// values have Unicode lookalikes. These can be substituted to improve
+// readability, at the risk of introducing ambiguity.
+
+    return string.replace(rx_character, function (character) {
+        return (
+            typeof lookalikes[character] === "string"
+            ? lookalikes[character]
+            : character
+        );
+    });
+}
+
 function encode(value) {
 
-// The 'encode' function encodes a 'value' as a string which is safe to append
-// on to a CSS class name.
+// The 'encode' function encodes a 'value' as a string that is safe to append on
+// to a CSS class.
 
 //      encode("10%");          // "10\\000025"
+//      encode("1.4");          // "1\\00002E4"
 //      encode("lightskyblue"); // "lightskyblue"
-
-// Encoding is necessary because a fragment's "class" property doubles as its
-// identifier. A class must therefore derive deterministically from the
-// arguments passed to the factory which produced it, and these could very well
-// contain characters not permitted within a class.
 
 // The Array.from function splits the string into glyphs, keeping any surrogate
 // pairs intact.
@@ -26,121 +54,102 @@ function encode(value) {
             return glyph;
         }
 
-// Most non-alphameric characters, like "." or "%", are only allowed in CSS
-// classes if they are escaped.
+// A Unicode escape sequence is a backslash followed by some hexadecimal
+// characters. The hex string can either be exactly 6 characters long, or
+// terminated by a space. The second option is likely to confuse, so we choose
+// the first option and pad the hex string with leading zeros.
 
         const unicode_hex = glyph.codePointAt(0).toString(16).toUpperCase();
-
-// The escape sequence begins with a single backslash. The hex string can either
-// be exactly 6 characters long, or terminated by a space. The second option is
-// likely to confuse, so we choose the first option and pad the hex string with
-// leading zeros.
-
         return "\\" + unicode_hex.padStart(6, "0");
     }).join("");
 }
 
-const rx_named_placeholder = /<([^<>\s]+)>/g;
-function place(name, template, substitutions, parameters, resolve, identify) {
+function render(classify, styler, label, template, data, parameters = {}) {
 
-// The 'place' function makes a fragment from a 'template'.
+// The 'render' function makes a fragment object, which is just data.
 
-    const replacements = {};
-    const rules = template.replace(
+    let used = Object.create(null);
+    const available = (
+        typeof data === "function"
+        ? data(parameters)
+        : data || parameters
+    );
+    const statements = template.replace(
         rx_named_placeholder,
-        function replacer(ignore, placeholder) {
-            if (typeof substitutions === "function") {
-
-// If 'substitutions' is a function, it is called with the placeholder and the
-// return value is used as the replacement.
-
-                replacements[placeholder] = substitutions(placeholder);
-            } else if (substitutions[placeholder] !== undefined) {
-
-// Otherwise, 'substitutions' is inspected for a matching property.
-
-                replacements[placeholder] = resolve(substitutions[placeholder]);
+        function replacer(placeholder, key) {
+            const value = available[key];
+            if (typeof value === "string" || typeof value === "number") {
+                used[key] = value;
+                return value;
             }
-            if (
-                typeof replacements[placeholder] !== "string"
-                && typeof replacements[placeholder] !== "number"
-            ) {
 
-// A suitable replacement was not found. This is a mistake.
+// A matching replacement was not provided. This is a mistake.
 
-                throw new Error("Unreplaceable <" + placeholder + ">.");
-            }
-            return replacements[placeholder];
+            throw new Error(
+                "Missing value for " + placeholder + " in styler \""
+                + label + "\"."
+            );
         }
     );
-    if (parameters === undefined) {
-        parameters = Object.values(replacements);
-    }
     return {
-        class: [
-            identify(name)
-        ].concat(
-            parameters.map(resolve)
-        ).map(
-            encode
-        ).join(
-            "_"
-        ),
-        rules
+        class: encode(classify(styler, label, used, parameters)),
+        statements
     };
 }
 
-function rule(name, declarations, substitutions, parameters) {
-    return function rule_styler(...args) {
-        const the_fragment = place(
-            name,
-            declarations,
-            substitutions,
-            parameters,
-            ...args
-        );
+function rule(label, template, data) {
+    return function rule_styler(parameters) {
+        return function rule_requireable(classify) {
+            const the_fragment = render(
+                classify,
+                rule_styler,
+                label,
+                template,
+                data,
+                parameters
+            );
 
-// The fragment's "rules" property actually just contains declarations. Wrap it
-// in a class selector to make the rule.
+// The fragment currently just contains CSS declarations. Wrap them in a class
+// selector to make a ruleset.
 
-        the_fragment.rules = (
-            "." + the_fragment.class + " {"
-            + the_fragment.rules
-            + "}"
-        );
-        return [the_fragment];
+            the_fragment.statements = (
+                "." + the_fragment.class + " {" + the_fragment.statements + "}"
+            );
+            return [the_fragment];
+        };
     };
 }
 
-const rx_class_placeholder = /<>/g;
-function fragment(name, rules, substitutions, parameters) {
-    return function fragment_styler(...args) {
-        const the_fragment = place(
-            name,
-            rules,
-            substitutions,
-            parameters,
-            ...args
-        );
+function fragment(label, template, data) {
+    return function fragment_styler(parameters) {
+        return function fragment_requireable(classify) {
+            const the_fragment = render(
+                classify,
+                fragment_styler,
+                label,
+                template,
+                data,
+                parameters
+            );
 
 // Replace occurrences of the empty placeholder with the generated class.
 
-        the_fragment.rules = the_fragment.rules.replace(
-            rx_class_placeholder,
-            the_fragment.class
-        );
-        return [the_fragment];
+            the_fragment.statements = the_fragment.statements.replace(
+                rx_empty_placeholder,
+                the_fragment.class
+            );
+            return [the_fragment];
+        };
     };
 }
 
 function mix(styler_array) {
-    return function mix_styler(...args) {
-        return styler_array.reduce(
-            function (fragments, styler) {
-                return fragments.concat(styler(...args));
-            },
-            []
-        );
+    return function mix_styler(parameters) {
+        return function mix_requireable(classify) {
+            return styler_array.reduce(function (fragments, styler) {
+                return fragments.concat(styler(parameters)(classify));
+            }, []);
+        };
     };
 }
 
@@ -148,15 +157,14 @@ function none() {
     return mix([]);
 }
 
-const rx_unicode_escape_sequence = /\\[0-9A-F]{6}/g;
-function domsert(fragment) {
+function domsert(css, the_class) {
     const style_element = document.createElement("style");
 
 // We assign each style element a unique attribute, to help the programmer
 // distinguish between them when debugging.
 
-    style_element.setAttribute("data-fragment", fragment.class);
-    style_element.textContent = fragment.rules.replace(
+    style_element.setAttribute("data-fstyle", the_class);
+    style_element.textContent = css.replace(
 
 // It is necessary to escape the backslash in any unicode escape sequences, so
 // that they are not interpreted by the HTML parser.
@@ -194,52 +202,97 @@ function domsert(fragment) {
     };
 }
 
-function identiref() {
-    let names = new WeakMap();
+function ref() {
+
+// Makes a classifier that varies the class solely by the styler's object
+// reference.
+
+    let ids = new WeakMap();
     let counter = 0;
-    return function identifier(value) {
-        if (typeof value === "string") {
-
-// The value is a string. It is the responsibility of the caller to ensure that
-// it is unique.
-
-            return value;
+    return function ref_classifier(styler) {
+        if (ids.has(styler)) {
+            return ids.get(styler);
         }
-
-// The value is a function. Check if we have already generated a name for it,
-// and if not, ensure a unique name by incrementing a counter.
-
-        if (names.has(value)) {
-            return names.get(value);
-        }
-        const name = "u" + counter + "_" + value.name;
+        const the_class = "f" + counter;
         counter += 1;
-        names.set(value, name);
-        return name;
+        ids.set(styler, the_class);
+        return the_class;
     };
 }
 
-// A valid class starts with a letter or underbar. Leading hyphens are reserved
-// for browser implementations, so we do not permit them. Subsequent characters
-// may include letters, numbers, underbars, hyphens or unicode escape sequences.
-// A unicode escape sequence is a backslash followed by 6 hexadecimal
-// characters.
+function development() {
 
-const rx_class = /^[_a-zA-Z](?:[_a-zA-Z0-9\-]|\\[0-9A-F]{6})*$/;
+// Makes a classifier suitable for use in development.
+
+// The class derives deterministically from the styler, the label, and the named
+// parameters. This produces the most meaningful and readable classes, but can
+// yield redundant fragments when optional parameters are used.
+// The 'parameters' parameter must be an object containing only primitive
+// values.
+
+    const ref_classifier = ref();
+    return function development_classifier(styler, label, ignore, parameters) {
+        return Object.keys(parameters).sort().reduce(
+            function append_parameter(the_class, key) {
+                const value = parameters[key];
+                if (typeof value === "function" || (
+                    value && typeof value === "object"
+                )) {
+
+// The value does not have a useful string form. This could cause a collision.
+
+                    throw new Error(
+                        "Bad parameter \"" + key
+                        + "\" provided to styler \"" + label + "\"."
+                    );
+                }
+                return the_class + "·" + key + "→" + spoof(String(value));
+            },
+            ref_classifier(styler) + "⎧" + label + "⎭"
+        );
+    };
+}
+
+function production(intern = false) {
+
+// Makes a classifier suitable for use in production.
+
+// The class derives deterministically from the styler, the label, and the
+// replacements (in the order that they were injected). This approach is very
+// precise and mechanical. It also permits 'parameters' to be any kind of
+// value. However, it produces long classes that are not very readable.
+
+// Setting 'intern' to true makes the class names much shorter, but uses more
+// memory. This strategy is intended for situations where HTML and CSS is being
+// generated on the server and will incur a network cost.
+
+    const ref_classifier = ref();
+    let intern_counter = 0;
+    let intern_memo = Object.create(null);
+    return function production_classifier(styler, label, replacements) {
+        const the_class = Object.keys(replacements).reduce(
+            function append_replacement(the_class, key) {
+                return the_class + "_" + key + "_" + replacements[key];
+            },
+            ref_classifier(styler) + "_" + label
+        );
+        if (intern) {
+            if (intern_memo[the_class] === undefined) {
+                intern_memo[the_class] = "f" + intern_counter;
+                intern_counter += 1;
+            }
+            return intern_memo[the_class];
+        }
+        return the_class;
+    };
+}
+
 function context(capabilities = {}) {
-    const insert = capabilities.insert || domsert;
-    const identify = capabilities.identify || identiref();
-    const requisitions = Object.create(null);
+    let insert = capabilities.insert || domsert;
+    let classify = capabilities.classify || development();
+    let requisitions = Object.create(null);
+
     function require_fragment(fragment) {
-        if (
-            typeof fragment.class !== "string"
-            || !rx_class.test(fragment.class)
-        ) {
-            throw new Error("Bad class.");
-        }
-        if (typeof fragment.rules !== "string") {
-            throw new Error("Bad rules.");
-        }
 
 // Each time a fragment is required, a reference is stored in the appropriate
 // 'requisition' object. References are discarded when their corresponding
@@ -250,17 +303,11 @@ function context(capabilities = {}) {
         let requisition = requisitions[fragment.class];
         if (requisition === undefined) {
             requisition = {
-                rules: fragment.rules,
-                remove: insert(fragment),
+                statements: fragment.statements,
+                remove: insert(fragment.statements, fragment.class),
                 references: [reference]
             };
         } else {
-            if (fragment.rules !== requisition.rules) {
-
-// The class does not uniquely identify its rules. It is not safe to continue.
-
-                throw new Error("Rules changed for " + fragment.class + ".");
-            }
             requisition.references.push(reference);
         }
         requisitions[fragment.class] = requisition;
@@ -275,31 +322,32 @@ function context(capabilities = {}) {
             }
         };
     }
-    function resolve(value) {
-        return (
-            typeof value === "function"
-            ? value(resolve)
-            : (
-                capabilities.resolve !== undefined
-                ? capabilities.resolve(value)
-                : value
-            )
-        );
-    }
-    return function require(styler) {
-        const fragments = styler(resolve, identify);
-        const releasers = fragments.map(require_fragment);
-        return {
-            classes: fragments.map(function (fragment) {
-                return fragment.class;
-            }),
-            release() {
-                return releasers.forEach(function (releaser) {
-                    releaser();
+
+    return Object.freeze({
+        require(requireable) {
+            const fragments = requireable(classify);
+            const releasers = fragments.map(require_fragment);
+            return {
+                classes: fragments.map(function (fragment) {
+                    return fragment.class;
+                }),
+                release() {
+                    return releasers.forEach(function (releaser) {
+                        releaser();
+                    });
+                }
+            };
+        },
+        dispose() {
+            if (insert !== undefined) {
+                Object.values(requisitions).forEach(function (requisition) {
+                    requisition.remove();
                 });
             }
-        };
-    };
+            insert = undefined;
+            classify = undefined;
+        }
+    });
 }
 
 export default Object.freeze({
@@ -309,5 +357,6 @@ export default Object.freeze({
     none,
     context,
     domsert,
-    identiref
+    development,
+    production
 });
