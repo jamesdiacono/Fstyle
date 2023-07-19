@@ -1,12 +1,12 @@
 # Fstyle
 
 _Fstyle_ is a JavaScript library that lets you parameterize fragments of
-arbitrary CSS, compose them together, and use them to dynamically style web
+arbitrary CSS, compose them together, and use them to style dynamic web
 applications.
 
 Styles defined using _Fstyle_ are
 [not tied](https://james.diacono.com.au/using_fstyle.html) to any particular
-framework, so they can be very portable. The rationale for _Fstyle_'s approach
+framework, so can be very portable. The rationale for _Fstyle_'s approach
 is given in the blog post
 [Styling Web Applications](https://james.diacono.com.au/styling_web_applications.html).
 
@@ -18,7 +18,7 @@ web application.
 ```javascript
 import fstyle from "./fstyle.js";
 
-// Two simple stylers are defined, each with a label and template.
+// Two simple stylers are defined, each with a label and a template.
 
 const button_styler = fstyle.rule("button", `
     border: 0.1em solid black;
@@ -83,9 +83,26 @@ The page now looks something like
 </body>
 ```
 
-`f0⎧button⎭` is a valid class. _Fstyle_ puts Unicode characters in classes to
-make them easier to read. This becomes especially important when stylers are
-parameterized.
+_Fstyle_ ensures that classes produced by different stylers do not collide, even
+in huge applications. For example:
+
+```javascript
+const other_button_styler = fstyle.rule("button", "color: limegreen");
+```
+
+Even though `other_button_styler` was created with the same label as
+`button_styler`, it produces the distinct class `f2⎧button⎭`. Within `context`,
+there is an exact correspondence of `f0` to `button_styler`, and `f2` to
+`other_button_styler`. The label is only included in the class to aid
+debugging.
+
+For _Fstyle_ to generate CSS without duplication, stylers should not be
+recreated needlessly. For best results, do not call `fstyle.rule` or
+`fstyle.fragment` within functions or loops.
+
+Note that `f0⎧button⎭` is a valid class. _Fstyle_ places Unicode characters in
+classes to make them easier to read. This becomes especially important when
+stylers are parameterized.
 
 The following styler takes two optional parameters, `enabled` and `selected`.
 Its `data` function transforms the parameters into values for the template.
@@ -137,7 +154,7 @@ The page might look something like
 ```html
 <head>
     <style>
-        .f2⎧tabber⎭·selected→true·disabled→true {
+        .f3⎧tabber⎭·selected→true·disabled→true {
             color: yellow;
             border: 2px solid yellow;
             border-radius: 6px;
@@ -148,7 +165,7 @@ The page might look something like
     </style>
 </head>
 <body>
-    <div class="f2⎧tabber⎭·selected→true·disabled→true">
+    <div class="f3⎧tabber⎭·selected→true·disabled→true">
         Tab me
     </div>
 </body>
@@ -162,12 +179,16 @@ Yes, that is a still a valid class.
 
 A __styler__ is any function that takes an optional _parameters_ object, and
 returns a __requireable__. A requireable is an opaque value representing zero
-or more fragments of CSS, and is meant to be passed to `context.require`.
+or more fragments of CSS, whose only purpose is to be passed to
+`context.require`.
 
-Stylers are usually invoked at the moment they are required:
+Even though requireables are opaque, you can still define stylers that use other
+stylers:
 
 ```javascript
-const handle = context.require(styler(parameters));
+function disabled_tabber_styler() {
+    return tabber_styler({disabled: true});
+}
 ```
 
 ## The functions
@@ -207,20 +228,23 @@ An exception is raised if a placeholder can not be filled. This could be because
 no matching value was found, or because the matching value is not a string or a
 number.
 
-The ruleset's class incorporates the names and values of the parameters.
-Characters not permitted within a class are safely escaped. For example,
-`link_styler` might produce the following CSS if `color` was `"red"`:
+The ruleset's class incorporates the names and values of the parameters. For
+example, `link_styler` (from the previous example) might produce the following
+CSS if `color` was `"red"`:
 
 ```css
-.f3⎧link⎭·color→red {
+.f4⎧link⎭·color→red {
+    font-weight: bold;
     color: red;
 }
 ```
 
-### fstyle.fragment(_name_, _template_, _data_)
+Characters not permitted within a class are safely escaped.
+
+### fstyle.fragment(_label_, _template_, _data_)
 
 The __fragment__ function makes a styler representing an arbitrary fragment of
-CSS. It processes the _template_ using the _data_ and parameters like
+CSS. It processes the _template_ using the _data_ and parameters how
 `fstyle.rule` does, but then replaces each occurrence of the empty placeholder
 `<>` with the generated class.
 
@@ -261,7 +285,7 @@ context.require(spinner_styler({color: "#a020f0", duration: "500ms"}))
 might produce the following CSS:
 
 ```css
-@keyframes f4⎧spinner⎭·color→＃a020f0·duration→500ms {
+@keyframes f5⎧spinner⎭·color→＃a020f0·duration→500ms {
     0% {
         transform: rotate(0deg);
     }
@@ -269,13 +293,13 @@ might produce the following CSS:
         transform: rotate(360deg);
     }
 }
-.f4⎧spinner⎭·color→＃a020f0·duration→500ms {
+.f5⎧spinner⎭·color→＃a020f0·duration→500ms {
     display: block;
     width: 20px;
     height: 20px;
     border-radius: 10px;
     border-top: 4px solid #a020f0;
-    animation: f4⎧spinner⎭·color→＃a020f0·duration→500ms 500ms linear infinite;
+    animation: f5⎧spinner⎭·color→＃a020f0·duration→500ms 500ms linear infinite;
 }
 ```
 
@@ -347,7 +371,7 @@ containing any of the following properties:
 
 #### spec.classify
 
-A function that generates a CSS class name that identifies a fragment of CSS.
+A function that generates a CSS class identifying a fragment of CSS.
 
 If `spec.classify` is omitted, `fstyle.development()` is used.
 
@@ -407,14 +431,6 @@ const context = fstyle.context({
 The development classifier produces highly readable classes but has a slight
 performance overhead. The production classifier produces less readable classes
 but aims to be safer and faster.
-
-Both classifiers incorporate the object reference of the styler function into
-the class. In example at the top of this document, there is an exact
-correspondance between `button_styler` and "f0", `centered_styler` and "f1",
-etc. This mechanism prevents classes from colliding even in huge applications,
-but also means that identical stylers should not be created more than once. For
-optimal performance, do not call `fstyle.rule` or `fstyle.fragment` within
-functions or loops.
 
 ### fstyle.domsert(_css_fragment_, _class_) → remove()
 
