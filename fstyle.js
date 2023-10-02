@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2023-05-07
+// 2023-10-03
 
 /*jslint browser */
 
@@ -143,20 +143,6 @@ function fragment(label, template, data) {
     };
 }
 
-function mix(styler_array) {
-    return function mix_styler(parameters) {
-        return function mix_requireable(classify) {
-            return styler_array.reduce(function (fragments, styler) {
-                return fragments.concat(styler(parameters)(classify));
-            }, []);
-        };
-    };
-}
-
-function none() {
-    return mix([]);
-}
-
 function domsert(css, the_class) {
     const style_element = document.createElement("style");
 
@@ -287,6 +273,16 @@ function production(intern = false) {
     };
 }
 
+function fragify(requireable, classify) {
+    return (
+        typeof requireable === "function"
+        ? requireable(classify)
+        : requireable.map(function (the_requireable) {
+            return fragify(the_requireable, classify);
+        }).flat()
+    );
+}
+
 function context(capabilities = {}) {
     let insert = capabilities.insert || domsert;
     let classify = capabilities.classify || development();
@@ -325,7 +321,7 @@ function context(capabilities = {}) {
 
     return Object.freeze({
         require(requireable) {
-            const fragments = requireable(classify);
+            const fragments = fragify(requireable, classify);
             const releasers = fragments.map(require_fragment);
             return {
                 classes: fragments.map(function (fragment) {
@@ -353,8 +349,6 @@ function context(capabilities = {}) {
 export default Object.freeze({
     rule,
     fragment,
-    mix,
-    none,
     context,
     domsert,
     development,

@@ -1,8 +1,8 @@
 # Fstyle
 
 _Fstyle_ is a JavaScript library that lets you parameterize fragments of
-arbitrary CSS, compose them together, and use them to style dynamic web
-applications.
+arbitrary CSS, compose them together, and use them to style web applications.
+Unlike static CSS, _Fstyle_ promotes modularity and does not penalize dynamism.
 
 Styles defined using _Fstyle_ are
 [not tied](https://james.diacono.com.au/using_fstyle.html) to any particular
@@ -34,9 +34,11 @@ const centered_styler = fstyle.rule("centered", `
     transform: translate(-50%, -50%);
 `);
 
-// The stylers are mixed together to form a composite styler.
+// These stylers a mixed together in a composite styler.
 
-const centered_button_styler = fstyle.mix([button_styler, centered_styler]);
+function centered_button_styler() {
+    return [button_styler(), centered_styler()];
+}
 
 // A context is created. It is responsible for injecting CSS fragments into the
 // page without duplication.
@@ -84,7 +86,7 @@ The page now looks something like
 ```
 
 _Fstyle_ ensures that classes produced by different stylers do not collide, even
-in huge applications. For example:
+in large applications. For example:
 
 ```javascript
 const other_button_styler = fstyle.rule("button", "color: limegreen");
@@ -177,13 +179,18 @@ Yes, that is a still a valid class.
 
 ### styler(_parameters_) → requireable
 
-A __styler__ is any function that takes an optional _parameters_ object, and
-returns a __requireable__. A requireable is an opaque value representing zero
-or more fragments of CSS, whose only purpose is to be passed to
-`context.require`.
+A __styler__ is any function that returns a requireable and optionally takes a
+_parameters_ object.
 
-Even though requireables are opaque, you can still define stylers that use other
-stylers:
+A __requireable__ is passed to `context.require` to inject zero or more
+fragments of CSS onto the page. A requireable is either:
+
+- an opaque value returned by a styler created using `fstyle.rule` or
+  `fstyle.fragment`, or
+- an array of requireables.
+
+A styler can be wrapped in a function if its parameters need to be transformed
+or predefined.
 
 ```javascript
 function disabled_tabber_styler() {
@@ -191,13 +198,50 @@ function disabled_tabber_styler() {
 }
 ```
 
+Stylers can be mixed together by defining a function returning an array of
+requireables. Notice how `spinning_link_styler` distributes its parameters to
+the stylers within, and how the empty array `[]` represents the absence of
+style.
+
+```javascript
+function spinning_link_styler({animating, color}) {
+    return [
+        (
+            animating
+            ? spinner_styler({color, duration: "500ms"})
+            : []
+        ),
+        link_styler({color})
+    ];
+}
+```
+
+Stylers containing conflicting declarations should not be mixed. Attempting to
+do so results in unpredictable behaviour.
+
+```javascript
+const red_styler = fstyle.rule("red", "color: red;");
+const green_styler = fstyle.rule("green", "color: green;");
+
+function bad_styler() {
+    return [red_styler(), green_styler()];
+}
+```
+
 ## The functions
 
-An object containing some useful functions is exported by fstyle.js:
+An object containing Fstyle's six functions is exported by fstyle.js:
 
 ```javascript
 import fstyle from "./fstyle.js";
 ```
+
+The `fstyle.rule` and `fstyle.fragment` functions are the most commonly used,
+being the styler factories. The `fstyle.context` function is generally only
+called once per application.
+
+The `fstyle.development`, `fstyle.production`, and `fstyle.domsert` functions
+offer additional control when configuring a context.
 
 ### fstyle.rule(_label_, _template_, _data_)
 
@@ -302,59 +346,6 @@ might produce the following CSS:
     animation: f5⎧spinner⎭·color→＃a020f0·duration→500ms 500ms linear infinite;
 }
 ```
-
-### fstyle.mix(_styler_array_)
-
-The __mix__ function makes a styler that combines an array of stylers into a
-new styler.
-
-```javascript
-const centered_link_styler = fstyle.mix([centered_styler, link_styler]);
-```
-
-Stylers containing conflicting declarations should not be mixed. Attempting to
-do so results in unpredictable behaviour.
-
-```javascript
-const bad_styler = fstyle.mix([
-    fstyle.rule("red", "color: red;"),
-    fstyle.rule("green", "color: green;")
-]);
-```
-
-Each styler in _styler_array_ receives the same parameters object passed to the
-composite styler. Wrapper functions can be used to transform parameters before
-they are passed on.
-
-```javascript
-const inert_styler = fstyle.none();
-const spinning_link_styler = fstyle.mix([
-    function spinner_wrapper({animating}) {
-        return (
-            animating
-            ? spinner_styler({color: "pink", duration: "500ms"})
-            : inert_styler()
-        );
-    },
-    function link_wrapper({animating}) {
-        return link_styler({
-            color: (
-                animating
-                ? "limegreen"
-                : "black"
-            )
-        });
-    }
-]);
-```
-
-Notice that the wrapper functions above are themselves stylers, because they
-take a parameters object and return a requireable.
-
-### fstyle.none()
-
-The __none__ function makes a styler that produces no classes or CSS. It was
-used in the preceeding example to do nothing when `animating` is false.
 
 ### fstyle.context(_spec_)
 
