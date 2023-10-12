@@ -2,7 +2,8 @@
 
 _Fstyle_ is a JavaScript library that lets you parameterize fragments of
 arbitrary CSS, compose them together, and use them to style web applications.
-Unlike static CSS, _Fstyle_ promotes modularity and does not penalize dynamism.
+It is designed to be used in sizeable, highly dynamic web applications where
+good modularity is crucial.
 
 Styles defined using _Fstyle_ are
 [not tied](https://james.diacono.com.au/using_fstyle.html) to any particular
@@ -18,23 +19,28 @@ web application.
 ```javascript
 import fstyle from "./fstyle.js";
 
-// Two simple stylers are defined, each with a label and a template.
+// Two primitive stylers are made by passing template functions to
+// 'fstyle.rule'.
 
-const button_styler = fstyle.rule("button", `
-    border: 0.1em solid black;
-    color: gold;
-    background: fuchsia;
-    padding: 1em;
-`);
+const button_styler = fstyle.rule(function button() {
+    return `
+        border: 0.1em solid black;
+        color: gold;
+        background: fuchsia;
+        padding: 1em;
+    `;
+});
 
-const centered_styler = fstyle.rule("centered", `
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-`);
+const centered_styler = fstyle.rule(function centered() {
+    return `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    `;
+});
 
-// These stylers a mixed together in a composite styler.
+// These stylers are mixed together to form a composite styler.
 
 function centered_button_styler() {
     return [button_styler(), centered_styler()];
@@ -45,7 +51,7 @@ function centered_button_styler() {
 
 const context = fstyle.context();
 
-// We "require" the composite styler, obtaining a handle object.
+// The composite styler is "required", producing a handle object.
 
 const handle = context.require(centered_button_styler());
 
@@ -57,7 +63,7 @@ button.classList.add(...handle.classes);
 document.body.append(button);
 ```
 
-The page now looks something like
+The page now looks something like this:
 
 ```html
 <head>
@@ -85,73 +91,68 @@ The page now looks something like
 </body>
 ```
 
-_Fstyle_ ensures that classes produced by different stylers do not collide, even
-in large applications. For example:
+Note that `f0⎧button⎭` is a valid class. _Fstyle_ places Unicode characters in
+classes to make them easier to read. (This becomes especially important when
+stylers are parameterized.)
+
+Notice how _Fstyle_ incorporates the names of the template functions, "button"
+and "centered", into the classes. Even so, the context ensures that classes
+produced by different stylers never collide. For example, suppose we create
+another styler whose template function is also named "button":
 
 ```javascript
-const other_button_styler = fstyle.rule("button", "color: limegreen");
+const other_button_styler = fstyle.rule(function button() {
+    return "color: limegreen";
+});
 ```
 
-Even though `other_button_styler` was created with the same label as
-`button_styler`, it produces the distinct class `f2⎧button⎭`. Within `context`,
-there is an exact correspondence of `f0` to `button_styler`, and `f2` to
-`other_button_styler`. The label is only included in the class to aid
-debugging.
+Rest assured that `other_button_styler` produces a distinct class, `f2⎧button⎭`.
+That is because, within `context`, there is an exact correspondence of `f0` to
+`button_styler`, and `f2` to `other_button_styler`. The name is only included
+in the class to aid debugging.
 
 For _Fstyle_ to generate CSS without duplication, stylers should not be
 recreated needlessly. For best results, do not call `fstyle.rule` or
-`fstyle.fragment` within functions or loops.
+`fstyle.css` within functions or loops.
 
-Note that `f0⎧button⎭` is a valid class. _Fstyle_ places Unicode characters in
-classes to make them easier to read. This becomes especially important when
-stylers are parameterized.
-
-The following styler takes two optional parameters, `enabled` and `selected`.
-Its `data` function transforms the parameters into values for the template.
+The following styler takes two parameters, `enabled` and `selected`. The
+template function, `tabber`, transforms the parameters into CSS values that are
+then used by the template.
 
 ```javascript
-const tabber_styler = fstyle.rule(
-    "tabber",
-    `
-        color: <color>;
-        border: 2px solid <color>;
+const tabber_styler = fstyle.rule(function tabber({disabled, selected}) {
+    const background = "black";
+    const color = (
+        selected
+        ? "yellow"
+        : "white"
+    );
+    const opacity = (
+        disabled
+        ? 0.4
+        : 1
+    );
+    return `
+        color: ${color};
+        border: 2px solid ${color};
         border-radius: 6px;
         padding: 0.5em;
-        background: <background>;
-        opacity: <opacity>;
-    `,
-    function data({
-        disabled = false,
-        selected = false
-    }) {
-        return {
-            background: "black",
-            color: (
-                selected
-                ? "yellow"
-                : "white"
-            ),
-            opacity: (
-                disabled
-                ? 0.4
-                : 1
-            )
-        };
-    }
+        background: ${background};
+        opacity: ${opacity};
+    `;
+});
+
+const handle = context.require(
+    tabber_styler({disabled: true, selected: true})
 );
 
-const handle = context.require(tabber_styler({
-    disabled: true,
-    selected: true
-}));
-
 const tabber = document.createElement("div");
-tabber.innerText = "My tabber";
+tabber.innerText = "Tab me";
 tabber.classList.add(...handle.classes);
 document.body.append(tabber);
 ```
 
-The page might look something like
+The page might look something like this:
 
 ```html
 <head>
@@ -179,14 +180,14 @@ Yes, that is a still a valid class.
 
 ### styler(_parameters_) → requireable
 
-A __styler__ is any function that returns a requireable and optionally takes a
-_parameters_ object.
+A __styler__ is any function that takes an optional _parameters_ object and
+returns a requireable.
 
 A __requireable__ is passed to `context.require` to inject zero or more
 fragments of CSS onto the page. A requireable is either:
 
-- an opaque value returned by a styler created using `fstyle.rule` or
-  `fstyle.fragment`, or
+- an opaque value returned by a styler made by `fstyle.rule` or
+  `fstyle.css`, or
 - an array of requireables.
 
 A styler can be wrapped in a function if its parameters need to be transformed
@@ -198,7 +199,7 @@ function disabled_tabber_styler() {
 }
 ```
 
-Stylers can be mixed together by defining a function returning an array of
+Stylers can be mixed together by defining a function that returns an array of
 requireables. Notice how `spinning_link_styler` distributes its parameters to
 the stylers within, and how the empty array `[]` represents the absence of
 style.
@@ -220,61 +221,59 @@ Stylers containing conflicting declarations should not be mixed. Attempting to
 do so results in unpredictable behaviour.
 
 ```javascript
-const red_styler = fstyle.rule("red", "color: red;");
-const green_styler = fstyle.rule("green", "color: green;");
+const red_styler = fstyle.rule(function red() {
+    return "color: red";
+});
+const green_styler = fstyle.rule(function green() {
+    return "color: green";
+});
 
 function bad_styler() {
     return [red_styler(), green_styler()];
 }
 ```
 
+Instead of attempting to mix the unmixable, make a styler that takes a `color`
+parameter.
+
+```javascript
+const good_styler = fstyle.rule(function good({color}) {
+    return `color: ${color}`;
+});
+```
+
 ## The functions
 
-An object containing Fstyle's six functions is exported by fstyle.js:
+An object containing four functions is exported by fstyle.js:
 
 ```javascript
 import fstyle from "./fstyle.js";
+const {rule, css, context, domsert} = fstyle;
 ```
 
-The `fstyle.rule` and `fstyle.fragment` functions are the most commonly used,
-being the styler factories. The `fstyle.context` function is generally only
-called once per application.
+The `fstyle.rule` and `fstyle.css` functions make stylers, and are the most
+commonly used.
+The `fstyle.context` function is generally called only once per application.
+The `fstyle.domsert` function offers additional control when configuring a
+context.
 
-The `fstyle.development`, `fstyle.production`, and `fstyle.domsert` functions
-offer additional control when configuring a context.
-
-### fstyle.rule(_label_, _template_, _data_)
+### fstyle.rule(_template_)
 
 The __rule__ function makes a styler representing a single CSS ruleset.
-The _label_ string is incorporated into the generated class to aid debugging.
-
-Each placeholder in the _template_ will be replaced by a value, either a string
-or a number. A placeholder takes the form `<name>`, where `name` is any
-non-empty string devoid of whitespace.
+The _template_ parameter is a function that takes a parameters object and
+returns a string containing any number of CSS declarations.
 
 ```javascript
-const link_styler = fstyle.rule("link", `
-    font-weight: bold;
-    color: <color>;
-`);
+const link_styler = fstyle.rule(function link({color}) {
+    return `
+        font-weight: bold;
+        color: ${color};
+    `;
+});
 ```
 
-The _template_ need not contain any placeholders. If it does have placeholders,
-how they are filled depends on the _data_ parameter.
-
- _data_        | Behavior
----------------|----------------------------------------------------------------
- function      | The _data_ function is called with the parameters object and returns an object holding the values.
- object        | The _data_ object holds the values, and any parameters are ignored.
- undefined     | The parameters object holds the values.
-
-An exception is raised if a placeholder can not be filled. This could be because
-no matching value was found, or because the matching value is not a string or a
-number.
-
 The ruleset's class incorporates the names and values of the parameters. For
-example, `link_styler` (from the previous example) might produce the following
-CSS if `color` was `"red"`:
+example, `link_styler` might produce the following CSS if `color` was `"red"`:
 
 ```css
 .f4⎧link⎭·color→red {
@@ -285,21 +284,20 @@ CSS if `color` was `"red"`:
 
 Characters not permitted within a class are safely escaped.
 
-### fstyle.fragment(_label_, _template_, _data_)
+### fstyle.css(_template_)
 
-The __fragment__ function makes a styler representing an arbitrary fragment of
-CSS. It processes the _template_ using the _data_ and parameters how
-`fstyle.rule` does, but then replaces each occurrence of the empty placeholder
-`<>` with the generated class.
+The __css__ function makes a styler representing an arbitrary fragment of CSS.
+The _template_ parameter is a function that takes a parameters object and
+returns an arbitrary CSS string. Any instances of the placeholder `[]` in the
+CSS string are replaced with the generated class.
 
-In the following example, the generated class is used both to identify a ruleset
-and an animation.
+In the following example, the generated class is used both to identify a set of
+animation keyframes and a ruleset.
 
 ```javascript
-const spinner_styler = fstyle.fragment(
-    "spinner",
-    `
-        @keyframes <> {
+const spinner_styler = fstyle.css(function spinner({color, duration}) {
+    return `
+        @keyframes [] {
             0% {
                 transform: rotate(0deg);
             }
@@ -307,23 +305,24 @@ const spinner_styler = fstyle.fragment(
                 transform: rotate(360deg);
             }
         }
-        .<> {
+        .[] {
             display: block;
             width: 20px;
             height: 20px;
             border-radius: 10px;
-            border-top: 4px solid <color>;
-            animation: <> <duration> linear infinite;
+            border-top: 4px solid ${color};
+            animation: [] ${duration} linear infinite;
         }
-    `,
-    {color, duration}
-);
+    `;
+});
 ```
 
 Calling
 
 ```javascript
-context.require(spinner_styler({color: "#a020f0", duration: "500ms"}))
+context.require(
+    spinner_styler({color: "#a020f0", duration: "500ms"})
+)
 ```
 
 might produce the following CSS:
@@ -360,21 +359,27 @@ const context = fstyle.context();
 The _spec_ parameter, if provided, configures the context. It is an object
 containing any of the following properties:
 
-#### spec.classify
+#### spec.insert(_fragment_) → remove()
 
-A function that generates a CSS class identifying a fragment of CSS.
+A function that takes a fragment and inserts its CSS into the page. It may
+return a _remove_ function, called to remove the fragment from the page.
 
-If `spec.classify` is omitted, `fstyle.development()` is used.
+The _fragment_ is an object like `{class, statements}`, where `class` is a CSS
+class string and `statements` is a string containing CSS statements.
 
-#### spec.insert(_css_fragment_, _class_) → remove()
+If `spec.insert` is undefined, `fstyle.domsert` is used.
 
-A function that takes a fragment of CSS as a string and inserts it into the
-page. It also receives the _class_ associated with the fragment. It may return
-a _remove_ function, called to remove the fragment from the page.
+#### spec.intern
 
-If `spec.insert` is omitted, `fstyle.domsert` is used.
+A boolean indicating whether classes should be radically shortened.
+Defaults to false.
 
-The context object returned by `fstyle.context` has two methods.
+Interning makes classes much shorter, but consumes additional memory for the
+lifetime of the context. Use interning only in production scenarios where HTML
+and CSS is being generated on the server and long classes would just waste
+network bandwidth.
+
+The context object returned by `fstyle.context` has two methods:
 
 #### context.require(_requireable_)
 
@@ -400,32 +405,16 @@ handle.release();
 
 #### context.dispose()
 
-The __dispose__ function releases the context's handles and renders it
-inoperable.
+The __dispose__ function releases all of the context's handles and renders the
+context inoperable.
 
 ```javascript
 context.dispose();
 ```
 
-### fstyle.development() → classifier
-### fstyle.production () → classifier
-
-The __development__ and __production__ functions return a _classifier_ function,
-suitable for use as `spec.classify`.
-
-```javascript
-const context = fstyle.context({
-    classify: fstyle.production()
-});
-```
-
-The development classifier produces highly readable classes but has a slight
-performance overhead. The production classifier produces less readable classes
-but aims to be safer and faster.
-
-### fstyle.domsert(_css_fragment_, _class_) → remove()
+### fstyle.domsert(_fragment_) → remove()
 
 The __domsert__ function may be used in conjunction with `fstyle.context` when
 the DOM is available. Each time it is called, a new style element is populated
-with the _fragment_'s rules and inserted into the head of the current document.
+with the _fragment_'s CSS and inserted into the head of the current document.
 It returns a _remove_ function that removes the style element.

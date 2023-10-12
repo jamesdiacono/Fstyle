@@ -1,25 +1,24 @@
 // fstyle.js
 // James Diacono
-// 2023-10-03
+// 2023-10-13
 
 /*jslint browser */
 
 // A valid class starts with a letter or underbar. Each subsequent character is
 // a letter, number, underbar, hyphen, or U+00A0 and above.
 
-const rx_class_character = /^[a-zA-Z0-9\u00a0-\uffff_\-]$/;
-const rx_named_placeholder = /<([^<>\s]+)>/g;
-const rx_empty_placeholder = /<>/g;
+const rx_class_character = /^[a-zA-Z0-9\u00A0-\uFFFF_\-]$/;
+const rx_placeholder = /\[\]/g;
 const rx_unicode_escape_sequence = /\\[0-9A-F]{6}/g;
 const rx_character = /./g;
 const lookalikes = {
     ".": "\u2024", // One Dot Leader
-    "#": "\uff03", // Fullwidth Number Sign
+    "#": "\uFF03", // Fullwidth Number Sign
     "%": "\u2052", // Commercial Minus Sign
-    "(": "\u27ee", // Mathematical Left Flattened Parenthesis
-    ")": "\u27ef", // Mathematical Right Flattened Parenthesis
-    ",": "\u201a", // Single Low-9 Quotation Mark
-    " ": "\u2008"  // Punctuation Space
+    "(": "\u27EE", // Mathematical Left Flattened Parenthesis
+    ")": "\u27EF", // Mathematical Right Flattened Parenthesis
+    ",": "\u201A", // Single Low-9 Quotation Mark
+    " ": "\u2423"  // Open Box
 };
 
 function spoof(string) {
@@ -64,93 +63,75 @@ function encode(value) {
     }).join("");
 }
 
-function render(classify, styler, label, template, data, parameters = {}) {
+function check_parameters(parameters, template) {
+    if (parameters !== undefined) {
+        Object.entries(parameters).forEach(function ([key, value]) {
+            if (typeof value === "function" || (
+                value && typeof value === "object"
+            )) {
 
-// The 'render' function makes a fragment object, which is just data.
+// The value does not have a meaningful string form. This could cause a
+// collision.
 
-    let used = Object.create(null);
-    const available = (
-        typeof data === "function"
-        ? data(parameters)
-        : data || parameters
-    );
-    const statements = template.replace(
-        rx_named_placeholder,
-        function replacer(placeholder, key) {
-            const value = available[key];
-            if (typeof value === "string" || typeof value === "number") {
-                used[key] = value;
-                return value;
+                throw new Error(
+                    "Bad parameter \"" + key
+                    + "\" provided to styler \"" + template.name + "\"."
+                );
             }
-
-// A matching replacement was not provided. This is a mistake.
-
-            throw new Error(
-                "Missing value for " + placeholder + " in styler \""
-                + label + "\"."
-            );
-        }
-    );
-    return {
-        class: encode(classify(styler, label, used, parameters)),
-        statements
-    };
+        });
+    }
 }
 
-function rule(label, template, data) {
-    return function rule_styler(parameters) {
+function check_template(template) {
+    if (typeof template !== "function") {
+        throw new Error("Not a template function: '" + template + "'");
+    }
+}
+
+function rule(template) {
+    check_template(template);
+    return function rule_styler(parameters = {}) {
+        check_parameters(parameters);
+        const declarations = template(parameters);
         return function rule_requireable(classify) {
-            const the_fragment = render(
-                classify,
-                rule_styler,
-                label,
-                template,
-                data,
-                parameters
-            );
+            const the_class = encode(classify(template, parameters));
+            return [{
+                class: the_class,
 
-// The fragment currently just contains CSS declarations. Wrap them in a class
-// selector to make a ruleset.
+// Wrap the rendered CSS declarations in a class selector to make a ruleset.
 
-            the_fragment.statements = (
-                "." + the_fragment.class + " {" + the_fragment.statements + "}"
-            );
-            return [the_fragment];
+                statements: "." + the_class + " {" + declarations + "}"
+            }];
         };
     };
 }
 
-function fragment(label, template, data) {
-    return function fragment_styler(parameters) {
+function css(template) {
+    check_template(template);
+    return function fragment_styler(parameters = {}) {
+        check_parameters(parameters);
+        const statements = template(parameters);
         return function fragment_requireable(classify) {
-            const the_fragment = render(
-                classify,
-                fragment_styler,
-                label,
-                template,
-                data,
-                parameters
-            );
+            const the_class = encode(classify(template, parameters));
+            return [{
+                class: the_class,
 
-// Replace occurrences of the empty placeholder with the generated class.
+// Replace occurrences of "[]" with the generated class.
 
-            the_fragment.statements = the_fragment.statements.replace(
-                rx_empty_placeholder,
-                the_fragment.class
-            );
-            return [the_fragment];
+                statements: statements.replace(rx_placeholder, the_class)
+            }];
         };
     };
 }
 
-function domsert(css, the_class) {
+function domsert(fragment) {
     const style_element = document.createElement("style");
 
 // We assign each style element a unique attribute, to help the programmer
 // distinguish between them when debugging.
 
-    style_element.setAttribute("data-fstyle", the_class);
-    style_element.textContent = css.replace(
+    style_element.setAttribute("data-fstyle", fragment.class);
+    style_element.textContent = fragment.statements.replace(
 
 // It is necessary to escape the backslash in any unicode escape sequences, so
 // that they are not interpreted by the HTML parser.
@@ -188,92 +169,13 @@ function domsert(css, the_class) {
     };
 }
 
-function ref() {
-
-// Makes a classifier that varies the class solely by the styler's object
-// reference.
-
-    let ids = new WeakMap();
-    let counter = 0;
-    return function ref_classifier(styler) {
-        if (ids.has(styler)) {
-            return ids.get(styler);
-        }
-        const the_class = "f" + counter;
-        counter += 1;
-        ids.set(styler, the_class);
-        return the_class;
-    };
-}
-
-function development() {
-
-// Makes a classifier suitable for use in development.
-
-// The class derives deterministically from the styler, the label, and the named
-// parameters. This produces the most meaningful and readable classes, but can
-// yield redundant fragments when optional parameters are used.
-// The 'parameters' parameter must be an object containing only primitive
-// values.
-
-    const ref_classifier = ref();
-    return function development_classifier(styler, label, ignore, parameters) {
-        return Object.keys(parameters).sort().reduce(
-            function append_parameter(the_class, key) {
-                const value = parameters[key];
-                if (typeof value === "function" || (
-                    value && typeof value === "object"
-                )) {
-
-// The value does not have a useful string form. This could cause a collision.
-
-                    throw new Error(
-                        "Bad parameter \"" + key
-                        + "\" provided to styler \"" + label + "\"."
-                    );
-                }
-                return the_class + "·" + key + "→" + spoof(String(value));
-            },
-            ref_classifier(styler) + "⎧" + label + "⎭"
-        );
-    };
-}
-
-function production(intern = false) {
-
-// Makes a classifier suitable for use in production.
-
-// The class derives deterministically from the styler, the label, and the
-// replacements (in the order that they were injected). This approach is very
-// precise and mechanical. It also permits 'parameters' to be any kind of
-// value. However, it produces long classes that are not very readable.
-
-// Setting 'intern' to true makes the class names much shorter, but uses more
-// memory. This strategy is intended for situations where HTML and CSS is being
-// generated on the server and will incur a network cost.
-
-    const ref_classifier = ref();
-    let intern_counter = 0;
-    let intern_memo = Object.create(null);
-    return function production_classifier(styler, label, replacements) {
-        const the_class = Object.keys(replacements).reduce(
-            function append_replacement(the_class, key) {
-                return the_class + "_" + key + "_" + replacements[key];
-            },
-            ref_classifier(styler) + "_" + label
-        );
-        if (intern) {
-            if (intern_memo[the_class] === undefined) {
-                intern_memo[the_class] = "f" + intern_counter;
-                intern_counter += 1;
-            }
-            return intern_memo[the_class];
-        }
-        return the_class;
-    };
-}
-
 function fragify(requireable, classify) {
+
+// A requireable is either a function or an array of requireables. Such a
+// recursive definition warrants a recursive function. The 'fragify' function
+// walks the tree (made up of arrays), invoking each function it finds with the
+// 'classify' function.
+
     return (
         typeof requireable === "function"
         ? requireable(classify)
@@ -283,10 +185,52 @@ function fragify(requireable, classify) {
     );
 }
 
-function context(capabilities = {}) {
-    let insert = capabilities.insert || domsert;
-    let classify = capabilities.classify || development();
+function context(spec = {}) {
+    let insert = spec.insert || domsert;
     let requisitions = Object.create(null);
+    let ids = new WeakMap();
+    let counter = 0;
+    let intern_counter = 0;
+    let interned = Object.create(null);
+
+    function classify(template, parameters) {
+
+// This 'classify' function returns class strings derived deterministically from
+// a template function (both its object reference and name) and the named
+// parameters.
+
+// The classes are readable and meaningful, but can yield redundant fragments
+// when optional parameters are used. I have not yet found a good solution for
+// this.
+
+// Interning makes the class names much shorter, but leaks memory for the
+// lifetime of the context. Interning is intended for production scenarios
+// where HTML and CSS is being generated on the server and will incur a network
+// cost.
+
+        let the_class;
+        if (ids.has(template)) {
+            the_class = ids.get(template);
+        } else {
+            the_class = "f" + counter + "⎧" + template.name + "⎭";
+            counter += 1;
+            ids.set(template, the_class);
+        }
+        Object.keys(parameters).sort().forEach(function (key) {
+            const value = parameters[key];
+            if (value !== undefined) {
+                the_class += "·" + key + "→" + spoof(String(value));
+            }
+        });
+        if (spec.intern === true) {
+            if (interned[the_class] === undefined) {
+                interned[the_class] = "f" + intern_counter;
+                intern_counter += 1;
+            }
+            return interned[the_class];
+        }
+        return the_class;
+    }
 
     function require_fragment(fragment) {
 
@@ -300,7 +244,7 @@ function context(capabilities = {}) {
         if (requisition === undefined) {
             requisition = {
                 statements: fragment.statements,
-                remove: insert(fragment.statements, fragment.class),
+                remove: insert(fragment),
                 references: [reference]
             };
         } else {
@@ -341,16 +285,8 @@ function context(capabilities = {}) {
                 });
             }
             insert = undefined;
-            classify = undefined;
         }
     });
 }
 
-export default Object.freeze({
-    rule,
-    fragment,
-    context,
-    domsert,
-    development,
-    production
-});
+export default Object.freeze({rule, css, context, domsert});
