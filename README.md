@@ -412,9 +412,13 @@ context inoperable.
 context.dispose();
 ```
 
-### fstyle.domsert(_fragment_) → remove()
+### fstyle.domsert(_fragment_, _parent_) → remove()
 
 The __domsert__ function may be used in conjunction with `fstyle.context` when
 the DOM is available. Each time it is called, a new style element is populated
-with the _fragment_'s CSS and inserted into the head of the current document.
-It returns a _remove_ function that removes the style element.
+with the _fragment_'s CSS and inserted into the _parent_.
+
+The _parent_ is a DOM `Element` or `DocumentFragment`, for example a
+`ShadowRoot`. It defaults to the head of the current document if omitted.
+
+The returned _remove_ function removes the style element from the _parent_.

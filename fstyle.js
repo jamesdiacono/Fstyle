@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2023-10-13
+// 2023-10-16
 
 /*jslint browser */
 
@@ -124,11 +124,11 @@ function css(template) {
     };
 }
 
-function domsert(fragment) {
+function domsert(fragment, parent = document.head) {
     const style_element = document.createElement("style");
 
-// We assign each style element a unique attribute, to help the programmer
-// distinguish between them when debugging.
+// We assign each style element a unique attribute so that we can find them
+// easily, and to help the programmer distinguish between them when debugging.
 
     style_element.setAttribute("data-fstyle", fragment.class);
     style_element.textContent = fragment.statements.replace(
@@ -141,9 +141,13 @@ function domsert(fragment) {
             return "\\" + match;
         }
     );
-    const existing = document.head.getElementsByTagName("style");
+
+// Find any style elements that we added previously. Only direct children are
+// considered.
+
+    const existing = parent.querySelectorAll(":scope > style[data-fstyle]");
     if (existing.length === 0) {
-        document.head.appendChild(style_element);
+        parent.appendChild(style_element);
     } else {
 
 // The order in which fragments are added to the page can affect the specificity
@@ -159,7 +163,7 @@ function domsert(fragment) {
 // this a subtle hazard. To help expose such mistakes quickly, the style
 // elements are inserted in a random order.
 
-        document.head.insertBefore(
+        parent.insertBefore(
             style_element,
             existing[Math.floor(Math.random() * existing.length)]
         );
