@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2023-10-16
+// 2023-10-25
 
 /*jslint browser */
 
@@ -63,35 +63,35 @@ function encode(value) {
     }).join("");
 }
 
-function check_parameters(parameters, template) {
-    if (parameters !== undefined) {
-        Object.entries(parameters).forEach(function ([key, value]) {
-            if (typeof value === "function" || (
-                value && typeof value === "object"
-            )) {
-
-// The value does not have a meaningful string form. This could cause a
-// collision.
-
-                throw new Error(
-                    "Bad parameter \"" + key
-                    + "\" provided to styler \"" + template.name + "\"."
-                );
-            }
-        });
-    }
-}
-
 function check_template(template) {
     if (typeof template !== "function") {
         throw new Error("Not a template function: '" + template + "'");
     }
 }
 
+function check_parameters(parameters, template_name) {
+    if (parameters !== undefined) {
+        Object.entries(parameters).forEach(function ([key, value]) {
+            if (typeof value === "function" || (
+                value && typeof value === "object"
+            )) {
+
+// The value does not have a meaningful string representation. This could cause
+// a class collision.
+
+                throw new Error(
+                    "Bad parameter \"" + key
+                    + "\" provided to styler \"" + template_name + "\"."
+                );
+            }
+        });
+    }
+}
+
 function rule(template) {
     check_template(template);
     return function rule_styler(parameters = {}) {
-        check_parameters(parameters);
+        check_parameters(parameters, template.name);
         const declarations = template(parameters);
         return function rule_requireable(classify) {
             const the_class = encode(classify(template, parameters));
@@ -109,7 +109,7 @@ function rule(template) {
 function css(template) {
     check_template(template);
     return function fragment_styler(parameters = {}) {
-        check_parameters(parameters);
+        check_parameters(parameters, template.name);
         const statements = template(parameters);
         return function fragment_requireable(classify) {
             const the_class = encode(classify(template, parameters));
