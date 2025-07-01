@@ -1,6 +1,6 @@
 // fstyle.js
 // James Diacono
-// 2023-10-25
+// 2025-07-01
 
 /*jslint browser */
 
@@ -71,6 +71,11 @@ function check_template(template) {
 
 function check_parameters(parameters, template_name) {
     if (parameters !== undefined) {
+        if (typeof parameters !== "object") {
+            throw new Error(
+                "Non-object passed to styler \"" + template_name + "\"."
+            );
+        }
         Object.entries(parameters).forEach(function ([key, value]) {
             if (typeof value === "function" || (
                 value && typeof value === "object"
